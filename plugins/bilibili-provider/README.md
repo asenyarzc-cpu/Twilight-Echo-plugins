@@ -11,6 +11,7 @@ Features:
 - Web QR login
 - Bilibili favorite folders
 - Audio-only playback through a local `127.0.0.1` proxy
+- Cover and avatar loading through the same local proxy with Bilibili headers
 - Private cookie storage in plugin settings
 
 The plugin depends on Twilight Echo's provider API and UI integration points.

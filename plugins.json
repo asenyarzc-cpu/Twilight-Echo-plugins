@@ -4,7 +4,7 @@
     {
       "id": "com.twilightecho.provider.bilibili",
       "name": "Bilibili Favorites Provider",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Play audio from videos in the signed-in user's Bilibili favorite folders.",
       "author": "Twilight Echo",
       "license": "Apache-2.0",
@@ -22,8 +22,8 @@
         "settings",
         "ui:inject"
       ],
-      "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.0.tep",
-      "checksumSha256": "69ea2b752d1b7ff4c313de7de5c43ed7e6ea81894581b1bf9bfd1fc9d3d07bef",
+      "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.1.tep",
+      "checksumSha256": "eeb75c557359fab1a89a118311bbf223af2ff877dc97f0d2888a7e9eeddf1901",
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "tags": [

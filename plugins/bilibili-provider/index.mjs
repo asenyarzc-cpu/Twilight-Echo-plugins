@@ -7,7 +7,8 @@ const BILI_REFERER = 'https://www.bilibili.com/'
 const BILI_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 const QR_EXPIRES_SECONDS = 180
-const PROXY_TOKEN_TTL_MS = 8 * 60 * 1000
+const STREAM_PROXY_TOKEN_TTL_MS = 8 * 60 * 1000
+const IMAGE_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
 const WBI_MIXIN_KEY_ENC_TAB = [
@@ -63,7 +64,7 @@ async function checkLogin() {
     const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie: auth.cookie })
     const data = nav.data
     if (!data?.isLogin) return { loggedIn: false, profile: null }
-    return { loggedIn: true, profile: mapProfile(data) }
+    return { loggedIn: true, profile: await mapProfile(data, auth.cookie) }
   } catch (error) {
     logWarn(`Bilibili login check failed: ${errorToMessage(error)}`)
     return { loggedIn: false, profile: null }
@@ -121,12 +122,17 @@ async function fetchUserLibrary() {
   url.searchParams.set('type', '2')
   const response = await biliJson(url, { cookie })
   const list = Array.isArray(response.data?.list) ? response.data.list : []
-  const playlists = sortFavoriteFolders(list).map((folder) => ({
-    id: String(folder.id),
-    name: String(folder.title || 'Bilibili 收藏夹'),
-    cover: typeof folder.cover === 'string' && folder.cover ? normalizeImageUrl(folder.cover) : null,
-    trackCount: Number(folder.media_count) || 0
-  }))
+  const playlists = await Promise.all(
+    sortFavoriteFolders(list).map(async (folder) => ({
+      id: String(folder.id),
+      name: String(folder.title || 'Bilibili 收藏夹'),
+      cover:
+        typeof folder.cover === 'string' && folder.cover
+          ? await createImageProxyUrl(folder.cover, cookie)
+          : null,
+      trackCount: Number(folder.media_count) || 0
+    }))
+  )
   return {
     likedPlaylist: playlists[0] ?? null,
     playlists
@@ -177,7 +183,7 @@ async function getPlaybackUrl(track) {
   const audioUrl = selectDashAudioUrl(response.data)
   if (!audioUrl) throw new Error('Bilibili 未返回可播放音频流')
   await ensureProxyServer()
-  const token = createProxyToken({ url: audioUrl, cookie })
+  const token = createProxyToken({ kind: 'stream', url: audioUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
   return `http://127.0.0.1:${proxyPort}/stream/${token}`
 }
 
@@ -191,13 +197,17 @@ async function mapMediaToTrack(media, albumName, cookie) {
   const page = Array.isArray(view?.pages) ? view.pages[0] : null
   const cid = Number(page?.cid ?? view?.cid)
   if (!Number.isFinite(cid)) return null
-  return mapBiliMediaToTrack(media, {
+  const track = mapBiliMediaToTrack(media, {
     bvid,
     cid,
     title: typeof page?.part === 'string' && page.part.trim() ? `${media.title} - ${page.part}` : String(media.title),
     duration: Number(page?.duration ?? media.duration) || 0,
     albumName
   })
+  if (track.cover) {
+    track.cover = await createImageProxyUrl(track.cover, cookie)
+  }
+  return track
 }
 
 async function getVideoView(bvid, cookie) {
@@ -275,26 +285,34 @@ async function handleProxyRequest(request, response) {
       response.end()
       return
     }
-    const match = /^\/stream\/([a-f0-9]+)$/.exec(request.url || '')
-    const entry = match ? proxyTokens.get(match[1]) : null
-    if (!entry || entry.expiresAt <= Date.now()) {
+    const match = /^\/(stream|image)\/([a-f0-9]+)$/.exec(request.url || '')
+    const kind = match?.[1]
+    const entry = match ? proxyTokens.get(match[2]) : null
+    if (!entry || entry.kind !== kind || entry.expiresAt <= Date.now()) {
       response.statusCode = 403
       response.end('Invalid or expired stream token')
       return
     }
     const upstreamHeaders = {
       Referer: BILI_REFERER,
-      'User-Agent': BILI_UA,
-      Cookie: entry.cookie
+      'User-Agent': BILI_UA
     }
+    if (entry.cookie) upstreamHeaders.Cookie = entry.cookie
     const range = request.headers.range
-    if (typeof range === 'string') upstreamHeaders.Range = range
+    if (kind === 'stream' && typeof range === 'string') upstreamHeaders.Range = range
     const upstream = await fetch(entry.url, { headers: upstreamHeaders })
     response.statusCode = upstream.status
     for (const [name, value] of upstream.headers) {
       if (shouldProxyHeader(name)) response.setHeader(name, value)
     }
     response.setHeader('Access-Control-Allow-Origin', '*')
+    if (kind === 'image') {
+      response.setHeader('Cache-Control', 'private, max-age=21600')
+    }
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
     if (!upstream.body) {
       response.end()
       return
@@ -305,20 +323,35 @@ async function handleProxyRequest(request, response) {
     response.end()
   } catch (error) {
     response.statusCode = 502
-    response.end(`Bilibili stream proxy failed: ${errorToMessage(error)}`)
+    response.end(`Bilibili proxy failed: ${errorToMessage(error)}`)
   }
 }
 
-function createProxyToken(entry) {
+function createProxyToken(entry, ttlMs) {
   const token = randomBytes(16).toString('hex')
   proxyTokens.set(token, {
     ...entry,
-    expiresAt: Date.now() + PROXY_TOKEN_TTL_MS
+    expiresAt: Date.now() + ttlMs
   })
   for (const [key, value] of proxyTokens) {
     if (value.expiresAt <= Date.now()) proxyTokens.delete(key)
   }
   return token
+}
+
+async function createImageProxyUrl(url, cookie) {
+  const normalized = normalizeImageUrl(url)
+  if (!normalized) return null
+  await ensureProxyServer()
+  const token = createProxyToken(
+    {
+      kind: 'image',
+      url: normalized,
+      cookie
+    },
+    IMAGE_PROXY_TOKEN_TTL_MS
+  )
+  return `http://127.0.0.1:${proxyPort}/image/${token}`
 }
 
 function shouldProxyHeader(name) {
@@ -398,11 +431,11 @@ export function mapBiliMediaToTrack(media, options) {
   }
 }
 
-function mapProfile(data) {
+async function mapProfile(data, cookie) {
   return {
     userId: data.mid,
     nickname: String(data.uname || 'Bilibili 用户'),
-    avatarUrl: normalizeImageUrl(String(data.face || '')),
+    avatarUrl: (await createImageProxyUrl(String(data.face || ''), cookie)) || '',
     signature: '',
     follows: 0,
     followeds: 0

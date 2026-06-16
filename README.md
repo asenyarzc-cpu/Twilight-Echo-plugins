@@ -31,7 +31,9 @@ Provider id: `bili`
 This plugin lets a signed-in user browse Bilibili video favorite folders and
 play video audio in Twilight Echo. It uses Bilibili Web QR login, stores cookies
 only in the plugin private settings file, maps tracks as `bili:<bvid>:<cid>`,
-and returns local `127.0.0.1` loopback proxy URLs for audio playback.
+and returns local `127.0.0.1` loopback proxy URLs for audio playback. Bilibili
+cover images and avatars are also proxied locally so the plugin can send the
+Referer and User-Agent headers required by Bilibili's image CDN.
 
 ## Build And Test
 
@@ -47,7 +49,7 @@ npm run pack
 
 `npm run pack` creates or updates:
 
-- `packages/com.twilightecho.provider.bilibili-0.1.0.tep`
+- `packages/com.twilightecho.provider.bilibili-0.1.1.tep`
 - `plugins.json`
 
 The generated package intentionally includes only runtime files such as
@@ -63,7 +65,7 @@ npm run dev
 ```
 
 The index uses relative package URLs such as
-`packages/com.twilightecho.provider.bilibili-0.1.0.tep`, so Twilight Echo
+`packages/com.twilightecho.provider.bilibili-0.1.1.tep`, so Twilight Echo
 resolves the package from the same GitHub raw base URL.
 
 ## Use From Your Own Server
@@ -72,7 +74,7 @@ You can host the same files on any HTTPS server:
 
 ```text
 https://plugins.example.com/twilight/plugins.json
-https://plugins.example.com/twilight/packages/com.twilightecho.provider.bilibili-0.1.0.tep
+https://plugins.example.com/twilight/packages/com.twilightecho.provider.bilibili-0.1.1.tep
 ```
 
 Then point Twilight Echo at your server:
