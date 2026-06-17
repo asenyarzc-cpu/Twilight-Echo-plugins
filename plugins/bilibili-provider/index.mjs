@@ -4,6 +4,7 @@ import { createServer } from 'http'
 const PROVIDER_ID = 'bili'
 const SETTINGS_AUTH_KEY = 'auth'
 const SETTINGS_PINNED_FAVORITE_KEY = 'pinnedFavoriteFolderId'
+const SETTINGS_PINNED_FAVORITES_KEY = 'pinnedFavoriteFolderIds'
 const SET_PINNED_FAVORITE_COMMAND = 'bilibili.setPinnedFavoriteFolder'
 const BILI_REFERER = 'https://www.bilibili.com/'
 const BILI_UA =
@@ -87,6 +88,7 @@ async function getProfile() {
 async function logout() {
   await requireContext().settings.delete(SETTINGS_AUTH_KEY)
   await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
+  await requireContext().settings.delete(SETTINGS_PINNED_FAVORITES_KEY)
   proxyTokens.clear()
   favoriteTrackCache.clear()
 }
@@ -127,14 +129,14 @@ async function checkQrLogin(key) {
 
 async function fetchUserLibrary() {
   const { cookie, profile } = await requireLoggedIn()
-  const pinnedFavoriteFolderId = await readPinnedFavoriteFolderId()
+  const pinnedFavoriteFolderIds = await readPinnedFavoriteFolderIds()
   const url = new URL('https://api.bilibili.com/x/v3/fav/folder/created/list-all')
   url.searchParams.set('up_mid', String(profile.userId))
   url.searchParams.set('type', '2')
   const response = await biliJson(url, { cookie })
   const list = Array.isArray(response.data?.list) ? response.data.list : []
   const playlists = await Promise.all(
-    sortFavoriteFolders(list, pinnedFavoriteFolderId).map(async (folder) => {
+    sortFavoriteFolders(list, pinnedFavoriteFolderIds).map(async (folder) => {
       const id = String(folder.id)
       return {
         id,
@@ -144,7 +146,7 @@ async function fetchUserLibrary() {
             ? await createImageProxyUrl(folder.cover, cookie)
             : null,
         trackCount: Number(folder.media_count) || 0,
-        pinned: Boolean(pinnedFavoriteFolderId && id === pinnedFavoriteFolderId)
+        pinned: pinnedFavoriteFolderIds.includes(id)
       }
     })
   )
@@ -294,19 +296,18 @@ async function fetchWithTimeout(input, options = {}, timeoutMs = BILI_REQUEST_TI
 }
 
 async function setPinnedFavoriteFolder(playlist) {
-  const currentId = await readPinnedFavoriteFolderId()
-  if (arguments.length === 0) return { pinnedFavoriteFolderId: currentId || null }
+  const currentIds = await readPinnedFavoriteFolderIds()
+  if (arguments.length === 0) return { pinnedFavoriteFolderIds: currentIds }
   const nextId = normalizeFavoriteFolderId(playlist)
   if (!nextId) {
-    await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
-    return { pinnedFavoriteFolderId: null }
+    await clearPinnedFavoriteFolders()
+    return { pinnedFavoriteFolderIds: [] }
   }
-  if (currentId === nextId) {
-    await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
-    return { pinnedFavoriteFolderId: null }
-  }
-  await requireContext().settings.set(SETTINGS_PINNED_FAVORITE_KEY, nextId)
-  return { pinnedFavoriteFolderId: nextId }
+  const nextIds = currentIds.includes(nextId)
+    ? currentIds.filter((id) => id !== nextId)
+    : [...currentIds, nextId]
+  await writePinnedFavoriteFolderIds(nextIds)
+  return { pinnedFavoriteFolderIds: nextIds }
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -491,15 +492,15 @@ function mergeCookieString(cookies) {
     .join('; ')
 }
 
-export function sortFavoriteFolders(list, pinnedFavoriteFolderId = '') {
-  return sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderId)
+export function sortFavoriteFolders(list, pinnedFavoriteFolderIds = []) {
+  return sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderIds)
 }
 
-export function sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderId = '') {
-  const pinnedId = normalizeFavoriteFolderId(pinnedFavoriteFolderId)
+export function sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderIds = []) {
+  const pinnedIds = normalizeFavoriteFolderIds(pinnedFavoriteFolderIds)
   return [...list].sort((left, right) => {
-    const leftPinned = pinnedId && String(left?.id) === pinnedId ? 0 : 1
-    const rightPinned = pinnedId && String(right?.id) === pinnedId ? 0 : 1
+    const leftPinned = pinnedIds.includes(String(left?.id)) ? 0 : 1
+    const rightPinned = pinnedIds.includes(String(right?.id)) ? 0 : 1
     if (leftPinned !== rightPinned) return leftPinned - rightPinned
     const leftDefault = isDefaultFavorite(left) ? 0 : 1
     const rightDefault = isDefaultFavorite(right) ? 0 : 1
@@ -513,8 +514,30 @@ function isDefaultFavorite(folder) {
   return Number.isFinite(attr) && (attr & 0b10) === 0
 }
 
-async function readPinnedFavoriteFolderId() {
-  return normalizeFavoriteFolderId(await requireContext().settings.get(SETTINGS_PINNED_FAVORITE_KEY))
+async function readPinnedFavoriteFolderIds() {
+  const settings = requireContext().settings
+  const ids = normalizeFavoriteFolderIds(await settings.get(SETTINGS_PINNED_FAVORITES_KEY))
+  if (ids.length > 0) return ids
+  const legacyId = normalizeFavoriteFolderId(await settings.get(SETTINGS_PINNED_FAVORITE_KEY))
+  if (!legacyId) return []
+  await settings.set(SETTINGS_PINNED_FAVORITES_KEY, [legacyId])
+  await settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
+  return [legacyId]
+}
+
+async function writePinnedFavoriteFolderIds(ids) {
+  const normalized = normalizeFavoriteFolderIds(ids)
+  if (normalized.length === 0) {
+    await clearPinnedFavoriteFolders()
+    return
+  }
+  await requireContext().settings.set(SETTINGS_PINNED_FAVORITES_KEY, normalized)
+  await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
+}
+
+async function clearPinnedFavoriteFolders() {
+  await requireContext().settings.delete(SETTINGS_PINNED_FAVORITES_KEY)
+  await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
 }
 
 function normalizeFavoriteFolderId(value) {
@@ -522,6 +545,11 @@ function normalizeFavoriteFolderId(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return ''
   const id = String(value).trim()
   return /^\d+$/.test(id) ? id : ''
+}
+
+function normalizeFavoriteFolderIds(value) {
+  const rawValues = Array.isArray(value) ? value : [value]
+  return [...new Set(rawValues.map(normalizeFavoriteFolderId).filter(Boolean))]
 }
 
 export function mapBiliMediaToTrack(media, options) {

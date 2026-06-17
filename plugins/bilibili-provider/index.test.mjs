@@ -121,19 +121,35 @@ test('selects highest bandwidth DASH audio and prefers flac audio', () => {
   )
 })
 
-test('sorts pinned favorite folder before the default folder', () => {
+test('sorts pinned favorite folders before unpinned folders', () => {
   const sorted = sortFavoriteFoldersWithPinned(
     [
       { id: 2, title: '稍后听', attr: 2 },
       { id: 1, title: '默认收藏夹', attr: 0 },
-      { id: 3, title: '动画', attr: 2 }
+      { id: 3, title: '动画', attr: 2 },
+      { id: 4, title: '音乐', attr: 2 }
     ],
-    '3'
+    ['3', '4']
   )
 
   assert.deepEqual(
     sorted.map((folder) => folder.id),
-    [3, 1, 2]
+    [3, 4, 1, 2]
+  )
+})
+
+test('keeps legacy single pinned favorite folder input compatible', () => {
+  const sorted = sortFavoriteFolders(
+    [
+      { id: 2, title: '稍后听', attr: 2 },
+      { id: 1, title: '默认收藏夹', attr: 0 }
+    ],
+    '2'
+  )
+
+  assert.deepEqual(
+    sorted.map((folder) => folder.id),
+    [2, 1]
   )
 })
 
