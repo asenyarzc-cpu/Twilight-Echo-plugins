@@ -1,7 +1,7 @@
 {
   "id": "com.twilightecho.provider.bilibili",
   "name": "Bilibili Favorites Provider",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Play audio from videos in the signed-in user's Bilibili favorite folders.",
   "author": "Twilight Echo",
   "license": "Apache-2.0",

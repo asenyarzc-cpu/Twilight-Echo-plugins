@@ -3,10 +3,13 @@ import test from 'node:test'
 
 import {
   encodeWbiWithKeys,
+  extractMediaCid,
   mapBiliMediaToTrack,
   parseSetCookies,
   selectDashAudioUrl,
-  sortFavoriteFolders
+  selectProgressivePlaybackUrl,
+  sortFavoriteFolders,
+  sortFavoriteFoldersWithPinned
 } from './index.mjs'
 
 test('signs Bilibili WBI parameters with stable w_rid', () => {
@@ -87,6 +90,13 @@ test('maps Bilibili favorite media to stable provider-prefixed track', () => {
   assert.equal(track.duration, 118)
 })
 
+test('extracts cid from Bilibili favorite media without video detail request', () => {
+  assert.equal(extractMediaCid({ ugc: { first_cid: 38856691242 } }), 38856691242)
+  assert.equal(extractMediaCid({ first_cid: 12345 }), 12345)
+  assert.equal(extractMediaCid({ cid: 67890 }), 67890)
+  assert.equal(extractMediaCid({ ugc: { first_cid: 0 } }), null)
+})
+
 test('selects highest bandwidth DASH audio and prefers flac audio', () => {
   assert.equal(
     selectDashAudioUrl({
@@ -109,4 +119,35 @@ test('selects highest bandwidth DASH audio and prefers flac audio', () => {
     }),
     'https://audio-flac.example'
   )
+})
+
+test('sorts pinned favorite folder before the default folder', () => {
+  const sorted = sortFavoriteFoldersWithPinned(
+    [
+      { id: 2, title: '稍后听', attr: 2 },
+      { id: 1, title: '默认收藏夹', attr: 0 },
+      { id: 3, title: '动画', attr: 2 }
+    ],
+    '3'
+  )
+
+  assert.deepEqual(
+    sorted.map((folder) => folder.id),
+    [3, 1, 2]
+  )
+})
+
+test('selects stable progressive playback url when available', () => {
+  assert.equal(
+    selectProgressivePlaybackUrl({
+      durl: [
+        { url: 'https://video-large.example', length: 1000, size: 9000 },
+        { url: 'https://video-small.example', length: 1000, size: 5000 },
+        { url: 'https://video-short.example', length: 500, size: 1000 }
+      ]
+    }),
+    'https://video-small.example'
+  )
+
+  assert.equal(selectProgressivePlaybackUrl({ dash: { audio: [] } }), null)
 })

@@ -3,14 +3,18 @@ import { createServer } from 'http'
 
 const PROVIDER_ID = 'bili'
 const SETTINGS_AUTH_KEY = 'auth'
+const SETTINGS_PINNED_FAVORITE_KEY = 'pinnedFavoriteFolderId'
+const SET_PINNED_FAVORITE_COMMAND = 'bilibili.setPinnedFavoriteFolder'
 const BILI_REFERER = 'https://www.bilibili.com/'
 const BILI_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 const QR_EXPIRES_SECONDS = 180
 const STREAM_PROXY_TOKEN_TTL_MS = 8 * 60 * 1000
 const IMAGE_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
+const BILI_REQUEST_TIMEOUT_MS = 15000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
+const VIDEO_VIEW_CONCURRENCY = 6
 const WBI_MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
   27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
@@ -22,6 +26,7 @@ let pluginContext = null
 let proxyServer = null
 let proxyPort = 0
 const proxyTokens = new Map()
+const favoriteTrackCache = new Map()
 
 export async function activate(context) {
   pluginContext = context
@@ -43,12 +48,15 @@ export async function activate(context) {
     id: 'bilibili-account',
     kind: 'settingsPanel',
     title: 'Bilibili 账号',
-    description: '登录后可在流媒体页播放收藏夹视频的音频'
+    description: '登录后可在流媒体页播放收藏夹视频的音频',
+    command: SET_PINNED_FAVORITE_COMMAND
   })
+  context.twilight.ui.onCommand(SET_PINNED_FAVORITE_COMMAND, setPinnedFavoriteFolder)
 }
 
 export async function deactivate() {
   proxyTokens.clear()
+  favoriteTrackCache.clear()
   if (proxyServer) {
     await new Promise((resolve) => proxyServer.close(resolve))
     proxyServer = null
@@ -78,7 +86,9 @@ async function getProfile() {
 
 async function logout() {
   await requireContext().settings.delete(SETTINGS_AUTH_KEY)
+  await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
   proxyTokens.clear()
+  favoriteTrackCache.clear()
 }
 
 async function getQrLogin() {
@@ -98,7 +108,7 @@ async function checkQrLogin(key) {
   if (typeof key !== 'string' || !key.trim()) throw new Error('Bilibili 二维码 key 无效')
   const url = new URL('https://passport.bilibili.com/x/passport-login/web/qrcode/poll')
   url.searchParams.set('qrcode_key', key.trim())
-  const response = await fetch(url, { headers: defaultHeaders() })
+  const response = await fetchWithTimeout(url, { headers: defaultHeaders() })
   const json = await response.json()
   const code = Number(json?.data?.code ?? json?.code)
   if (code === 0) {
@@ -117,21 +127,26 @@ async function checkQrLogin(key) {
 
 async function fetchUserLibrary() {
   const { cookie, profile } = await requireLoggedIn()
+  const pinnedFavoriteFolderId = await readPinnedFavoriteFolderId()
   const url = new URL('https://api.bilibili.com/x/v3/fav/folder/created/list-all')
   url.searchParams.set('up_mid', String(profile.userId))
   url.searchParams.set('type', '2')
   const response = await biliJson(url, { cookie })
   const list = Array.isArray(response.data?.list) ? response.data.list : []
   const playlists = await Promise.all(
-    sortFavoriteFolders(list).map(async (folder) => ({
-      id: String(folder.id),
-      name: String(folder.title || 'Bilibili 收藏夹'),
-      cover:
-        typeof folder.cover === 'string' && folder.cover
-          ? await createImageProxyUrl(folder.cover, cookie)
-          : null,
-      trackCount: Number(folder.media_count) || 0
-    }))
+    sortFavoriteFolders(list, pinnedFavoriteFolderId).map(async (folder) => {
+      const id = String(folder.id)
+      return {
+        id,
+        name: String(folder.title || 'Bilibili 收藏夹'),
+        cover:
+          typeof folder.cover === 'string' && folder.cover
+            ? await createImageProxyUrl(folder.cover, cookie)
+            : null,
+        trackCount: Number(folder.media_count) || 0,
+        pinned: Boolean(pinnedFavoriteFolderId && id === pinnedFavoriteFolderId)
+      }
+    })
   )
   return {
     likedPlaylist: playlists[0] ?? null,
@@ -139,7 +154,10 @@ async function fetchUserLibrary() {
   }
 }
 
-async function fetchPlaylistTracks(playlistId) {
+async function fetchPlaylistTracks(playlistId, force = false) {
+  const cacheKey = String(playlistId)
+  if (!force && favoriteTrackCache.has(cacheKey)) return favoriteTrackCache.get(cacheKey) ?? []
+
   const { cookie } = await requireLoggedIn()
   const tracks = []
   for (let page = 1; page <= MAX_FAVORITE_PAGES; page += 1) {
@@ -152,13 +170,14 @@ async function fetchPlaylistTracks(playlistId) {
     const response = await biliJson(url, { cookie })
     const medias = Array.isArray(response.data?.medias) ? response.data.medias : []
     const albumName = typeof response.data?.info?.title === 'string' ? response.data.info.title : 'Bilibili'
-    for (const media of medias) {
-      if (media?.type !== 2 || media?.attr !== 0) continue
-      const track = await mapMediaToTrack(media, albumName, cookie)
-      if (track) tracks.push(track)
-    }
+    const playableMedias = medias.filter((media) => media?.type === 2 && media?.attr === 0)
+    const mappedTracks = await mapWithConcurrency(playableMedias, VIDEO_VIEW_CONCURRENCY, (media) =>
+      mapMediaToTrack(media, albumName, cookie)
+    )
+    tracks.push(...mappedTracks.filter(Boolean))
     if (!response.data?.has_more || medias.length === 0) break
   }
+  favoriteTrackCache.set(cacheKey, tracks)
   return tracks
 }
 
@@ -168,6 +187,26 @@ async function getPlaybackUrl(track) {
   if (!ids) throw new Error('Bilibili track id 无效')
   const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie })
   const keys = extractWbiKeys(nav.data?.wbi_img)
+  const progressiveQuery = encodeWbiWithKeys(
+    {
+      bvid: ids.bvid,
+      cid: ids.cid,
+      qn: 16,
+      fnval: 0,
+      fnver: 0,
+      fourk: 0
+    },
+    keys
+  )
+  const progressiveUrl = `https://api.bilibili.com/x/player/wbi/playurl?${progressiveQuery}`
+  const progressiveResponse = await biliJson(progressiveUrl, { cookie })
+  const progressiveMediaUrl = selectProgressivePlaybackUrl(progressiveResponse.data)
+  if (progressiveMediaUrl) {
+    await ensureProxyServer()
+    const token = createProxyToken({ kind: 'stream', url: progressiveMediaUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
+    return `http://127.0.0.1:${proxyPort}/stream/${token}`
+  }
+
   const query = encodeWbiWithKeys(
     {
       bvid: ids.bvid,
@@ -190,12 +229,12 @@ async function getPlaybackUrl(track) {
 async function mapMediaToTrack(media, albumName, cookie) {
   const bvid = typeof media.bvid === 'string' ? media.bvid : typeof media.bv_id === 'string' ? media.bv_id : ''
   if (!bvid) return null
-  const view = await getVideoView(bvid, cookie).catch((error) => {
+  const view = extractMediaCid(media) ? null : await getVideoView(bvid, cookie).catch((error) => {
     logWarn(`Skipping Bilibili media ${bvid}: ${errorToMessage(error)}`)
     return null
   })
   const page = Array.isArray(view?.pages) ? view.pages[0] : null
-  const cid = Number(page?.cid ?? view?.cid)
+  const cid = extractMediaCid(media) ?? Number(page?.cid ?? view?.cid)
   if (!Number.isFinite(cid)) return null
   const track = mapBiliMediaToTrack(media, {
     bvid,
@@ -217,8 +256,13 @@ async function getVideoView(bvid, cookie) {
   return response.data
 }
 
+export function extractMediaCid(media) {
+  const cid = Number(media?.ugc?.first_cid ?? media?.first_cid ?? media?.cid)
+  return Number.isFinite(cid) && cid > 0 ? cid : null
+}
+
 async function biliJson(input, options = {}) {
-  const response = await fetch(input, {
+  const response = await fetchWithTimeout(input, {
     headers: defaultHeaders(options.cookie)
   })
   if (!response.ok) {
@@ -229,6 +273,55 @@ async function biliJson(input, options = {}) {
     throw new Error(`Bilibili API 错误：${json?.message || json?.code}`)
   }
   return json
+}
+
+async function fetchWithTimeout(input, options = {}, timeoutMs = BILI_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, {
+      ...options,
+      signal: controller.signal
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Bilibili 请求超时，请稍后重试')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function setPinnedFavoriteFolder(playlist) {
+  const currentId = await readPinnedFavoriteFolderId()
+  if (arguments.length === 0) return { pinnedFavoriteFolderId: currentId || null }
+  const nextId = normalizeFavoriteFolderId(playlist)
+  if (!nextId) {
+    await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
+    return { pinnedFavoriteFolderId: null }
+  }
+  if (currentId === nextId) {
+    await requireContext().settings.delete(SETTINGS_PINNED_FAVORITE_KEY)
+    return { pinnedFavoriteFolderId: null }
+  }
+  await requireContext().settings.set(SETTINGS_PINNED_FAVORITE_KEY, nextId)
+  return { pinnedFavoriteFolderId: nextId }
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length)
+  let nextIndex = 0
+  const workerCount = Math.min(Math.max(1, concurrency), items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 function defaultHeaders(cookie) {
@@ -398,8 +491,16 @@ function mergeCookieString(cookies) {
     .join('; ')
 }
 
-export function sortFavoriteFolders(list) {
+export function sortFavoriteFolders(list, pinnedFavoriteFolderId = '') {
+  return sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderId)
+}
+
+export function sortFavoriteFoldersWithPinned(list, pinnedFavoriteFolderId = '') {
+  const pinnedId = normalizeFavoriteFolderId(pinnedFavoriteFolderId)
   return [...list].sort((left, right) => {
+    const leftPinned = pinnedId && String(left?.id) === pinnedId ? 0 : 1
+    const rightPinned = pinnedId && String(right?.id) === pinnedId ? 0 : 1
+    if (leftPinned !== rightPinned) return leftPinned - rightPinned
     const leftDefault = isDefaultFavorite(left) ? 0 : 1
     const rightDefault = isDefaultFavorite(right) ? 0 : 1
     if (leftDefault !== rightDefault) return leftDefault - rightDefault
@@ -410,6 +511,17 @@ export function sortFavoriteFolders(list) {
 function isDefaultFavorite(folder) {
   const attr = Number(folder?.attr)
   return Number.isFinite(attr) && (attr & 0b10) === 0
+}
+
+async function readPinnedFavoriteFolderId() {
+  return normalizeFavoriteFolderId(await requireContext().settings.get(SETTINGS_PINNED_FAVORITE_KEY))
+}
+
+function normalizeFavoriteFolderId(value) {
+  if (value && typeof value === 'object') return normalizeFavoriteFolderId(value.id)
+  if (typeof value !== 'string' && typeof value !== 'number') return ''
+  const id = String(value).trim()
+  return /^\d+$/.test(id) ? id : ''
 }
 
 export function mapBiliMediaToTrack(media, options) {
@@ -499,6 +611,22 @@ export function selectDashAudioUrl(data) {
     }))
     .filter((item) => typeof item.url === 'string' && item.url)
   candidates.sort((left, right) => right.bandwidth - left.bandwidth)
+  return candidates[0]?.url ?? null
+}
+
+export function selectProgressivePlaybackUrl(data) {
+  const durl = Array.isArray(data?.durl) ? data.durl : []
+  const candidates = durl
+    .map((item) => ({
+      url: typeof item?.url === 'string' ? item.url : '',
+      length: Number(item?.length) || 0,
+      size: Number(item?.size) || 0
+    }))
+    .filter((item) => item.url)
+  candidates.sort((left, right) => {
+    if (left.length !== right.length) return right.length - left.length
+    return left.size - right.size
+  })
   return candidates[0]?.url ?? null
 }
 

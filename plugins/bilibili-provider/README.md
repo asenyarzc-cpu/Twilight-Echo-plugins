@@ -10,6 +10,7 @@ Features:
 
 - Web QR login
 - Bilibili favorite folders
+- Pin one favorite folder so it stays at the top of the Bilibili library
 - Audio-only playback through a local `127.0.0.1` proxy
 - Cover and avatar loading through the same local proxy with Bilibili headers
 - Private cookie storage in plugin settings
