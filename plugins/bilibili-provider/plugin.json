@@ -1,9 +1,9 @@
 {
   "id": "com.twilightecho.provider.bilibili",
-  "name": "Bilibili Favorites Provider",
+  "name": "Bilibili 收藏夹音源",
   "version": "0.1.3",
-  "description": "Play audio from videos in the signed-in user's Bilibili favorite folders.",
-  "author": "Twilight Echo",
+  "description": "解析并在 Twilight Echo 流媒体区展示 B 站收藏夹内容。通过 DASH 音频提取进行高音质无缝播放。",
+  "author": "Px_asen",
   "license": "Apache-2.0",
   "type": ["provider", "ui"],
   "main": "index.mjs",

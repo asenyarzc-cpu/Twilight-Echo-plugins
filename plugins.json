@@ -3,10 +3,10 @@
   "plugins": [
     {
       "id": "com.twilightecho.provider.bilibili",
-      "name": "Bilibili Favorites Provider",
+      "name": "Bilibili 收藏夹音源",
       "version": "0.1.3",
-      "description": "Play audio from videos in the signed-in user's Bilibili favorite folders.",
-      "author": "Twilight Echo",
+      "description": "解析并在 Twilight Echo 流媒体区展示 B 站收藏夹内容。通过 DASH 音频提取进行高音质无缝播放。",
+      "author": "Px_asen",
       "license": "Apache-2.0",
       "type": [
         "provider",
@@ -23,7 +23,7 @@
         "ui:inject"
       ],
       "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.3.tep",
-      "checksumSha256": "9ea995bdfafbe84fd43a47acfb50ccda8a7c606a835fbb2736fe6797bc986a18",
+      "checksumSha256": "0e8a58bd1baaab7a5b7c74c99eba9e37a70825d04a1a00ea087678a11e5db3f2",
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "tags": [

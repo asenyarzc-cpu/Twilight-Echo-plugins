@@ -221,10 +221,21 @@ async function getPlaybackUrl(track) {
   )
   const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${query}`
   const response = await biliJson(playUrl, { cookie })
-  const audioUrl = selectDashAudioUrl(response.data)
-  if (!audioUrl) throw new Error('Bilibili 未返回可播放音频流')
+  const audioSource = selectDashAudioSource(response.data)
+  if (!audioSource) throw new Error('Bilibili 未返回可播放音频流')
   await ensureProxyServer()
-  const token = createProxyToken({ kind: 'stream', url: audioUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
+  const token = createProxyToken(
+    {
+      kind: 'stream',
+      urls: audioSource.urls,
+      cookie,
+      contentType: audioSource.contentType
+    },
+    STREAM_PROXY_TOKEN_TTL_MS
+  )
+  logInfo(
+    `Bilibili playback stream selected: ${audioSource.contentType} (${audioSource.codec || 'unknown'})`
+  )
   return `http://127.0.0.1:${proxyPort}/stream/${token}`
 }
 
@@ -394,12 +405,20 @@ async function handleProxyRequest(request, response) {
     if (entry.cookie) upstreamHeaders.Cookie = entry.cookie
     const range = request.headers.range
     if (kind === 'stream' && typeof range === 'string') upstreamHeaders.Range = range
-    const upstream = await fetch(entry.url, { headers: upstreamHeaders })
+    const upstream = kind === 'stream' ? await fetchStreamCandidate(entry, upstreamHeaders) : await fetch(entry.url, { headers: upstreamHeaders })
+    if (!upstream) {
+      response.statusCode = 502
+      response.end('Bilibili proxy failed: no playable upstream stream')
+      return
+    }
     response.statusCode = upstream.status
     for (const [name, value] of upstream.headers) {
       if (shouldProxyHeader(name)) response.setHeader(name, value)
     }
     response.setHeader('Access-Control-Allow-Origin', '*')
+    if (kind === 'stream') {
+      response.setHeader('Content-Type', entry.contentType || upstream.headers.get('content-type') || 'audio/mp4')
+    }
     if (kind === 'image') {
       response.setHeader('Cache-Control', 'private, max-age=21600')
     }
@@ -446,6 +465,24 @@ async function createImageProxyUrl(url, cookie) {
     IMAGE_PROXY_TOKEN_TTL_MS
   )
   return `http://127.0.0.1:${proxyPort}/image/${token}`
+}
+
+async function fetchStreamCandidate(entry, upstreamHeaders) {
+  const urls = Array.isArray(entry.urls) ? entry.urls : entry.url ? [entry.url] : []
+  let lastError = null
+  for (const url of urls) {
+    try {
+      const upstream = await fetch(url, { headers: upstreamHeaders })
+      if (upstream.ok) return upstream
+      lastError = new Error(`HTTP ${upstream.status}`)
+      logWarn(`Bilibili stream candidate failed: ${upstream.status}`)
+    } catch (error) {
+      lastError = error
+      logWarn(`Bilibili stream candidate failed: ${errorToMessage(error)}`)
+    }
+  }
+  if (lastError) logWarn(`Bilibili stream exhausted: ${errorToMessage(lastError)}`)
+  return null
 }
 
 function shouldProxyHeader(name) {
@@ -629,17 +666,78 @@ function encodeWbiValue(value) {
 }
 
 export function selectDashAudioUrl(data) {
-  const flac = data?.dash?.flac?.audio
-  if (flac?.baseUrl || flac?.base_url) return flac.baseUrl || flac.base_url
+  return selectDashAudioSource(data)?.urls[0] ?? null
+}
+
+export function selectDashAudioSource(data) {
   const audio = Array.isArray(data?.dash?.audio) ? data.dash.audio : []
   const candidates = audio
-    .map((item) => ({
-      url: item?.baseUrl || item?.base_url,
-      bandwidth: Number(item?.bandwidth) || 0
-    }))
-    .filter((item) => typeof item.url === 'string' && item.url)
-  candidates.sort((left, right) => right.bandwidth - left.bandwidth)
-  return candidates[0]?.url ?? null
+    .map((item) => {
+      const url = item?.baseUrl || item?.base_url
+      if (typeof url !== 'string' || !url) return null
+      const backups = []
+      const backupList = item?.backupUrl || item?.backup_url
+      if (Array.isArray(backupList)) {
+        for (const backup of backupList) {
+          if (typeof backup === 'string' && backup && backup !== url) backups.push(backup)
+        }
+      }
+      const codec = typeof item?.codecs === 'string' ? item.codecs : ''
+      const mimeType = typeof item?.mimeType === 'string' ? item.mimeType : typeof item?.mime_type === 'string' ? item.mime_type : 'audio/mp4'
+      return {
+        url,
+        urls: [url, ...backups],
+        bandwidth: Number(item?.bandwidth) || 0,
+        codec,
+        mimeType
+      }
+    })
+    .filter(Boolean)
+  candidates.sort((left, right) => {
+    const leftScore = getAudioCodecScore(left.codec)
+    const rightScore = getAudioCodecScore(right.codec)
+    if (leftScore !== rightScore) return leftScore - rightScore
+    return right.bandwidth - left.bandwidth
+  })
+  const selected = candidates[0] ?? null
+  if (!selected) {
+    const flac = data?.dash?.flac?.audio
+    const flacUrl = flac?.baseUrl || flac?.base_url
+    if (typeof flacUrl === 'string' && flacUrl) {
+      return {
+        url: flacUrl,
+        urls: [flacUrl],
+        bandwidth: Number(flac?.bandwidth) || 0,
+        codec: typeof flac?.codecs === 'string' ? flac.codecs : 'fLaC',
+        mimeType: typeof flac?.mimeType === 'string' ? flac.mimeType : typeof flac?.mime_type === 'string' ? flac.mime_type : 'audio/flac',
+        contentType: normalizeAudioContentType(
+          typeof flac?.mimeType === 'string' ? flac.mimeType : typeof flac?.mime_type === 'string' ? flac.mime_type : 'audio/flac',
+          typeof flac?.codecs === 'string' ? flac.codecs : 'fLaC'
+        )
+      }
+    }
+    return null
+  }
+  return {
+    ...selected,
+    contentType: normalizeAudioContentType(selected.mimeType, selected.codec)
+  }
+}
+
+function getAudioCodecScore(codec) {
+  const value = String(codec || '').toLowerCase()
+  if (value.includes('mp4a') || value.includes('aac')) return 0
+  if (value.includes('opus')) return 1
+  if (value.includes('flac')) return 2
+  return 3
+}
+
+function normalizeAudioContentType(mimeType, codec) {
+  const normalized = String(mimeType || '').trim().toLowerCase()
+  if (normalized.startsWith('audio/')) return normalized
+  const codecText = String(codec || '').toLowerCase()
+  if (codecText.includes('flac')) return 'audio/flac'
+  return 'audio/mp4'
 }
 
 export function selectProgressivePlaybackUrl(data) {
