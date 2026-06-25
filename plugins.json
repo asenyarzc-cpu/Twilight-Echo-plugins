@@ -32,6 +32,38 @@
         "bilibili"
       ],
       "verified": true
+    },
+    {
+      "id": "com.twilightecho.provider.ytmusic",
+      "name": "YouTube Music 音源",
+      "version": "0.1.0",
+      "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。支持搜索、播放、歌词和用户歌单。",
+      "author": "Px_asen",
+      "license": "Apache-2.0",
+      "type": [
+        "provider",
+        "ui"
+      ],
+      "main": "index.mjs",
+      "engines": {
+        "twilightEcho": ">=0.20.0"
+      },
+      "apiVersion": 1,
+      "permissions": [
+        "network",
+        "settings",
+        "ui:inject"
+      ],
+      "sourceUrl": "packages/com.twilightecho.provider.ytmusic-0.1.0.tep",
+      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "tags": [
+        "provider",
+        "ui",
+        "youtube-music"
+      ],
+      "verified": true,
+      "checksumSha256": "4d82e031fa36135a0d7a8cbb76bcf2bc6edfa3b88938f478ebf7e51e5ddcd3b9"
     }
   ]
 }

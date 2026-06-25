@@ -36,6 +36,16 @@ export async function activate(context) {
     id: PROVIDER_ID,
     name: 'Bilibili',
     capabilities: ['login', 'playlist', 'library', 'playbackUrl', 'cover'],
+    ui: {
+      icon: 'pi pi-video',
+      color: '#00a1d6',
+      description: '收藏夹视频音频',
+      authType: 'qr',
+      loginInstructions: '请使用哔哩哔哩 App 扫码登录',
+      qrStatusCodes: { waiting: 86101, scanned: 86090, expired: 86038, success: 0 },
+      streamingLibraryTab: true,
+      streamingSearch: false
+    },
     checkLogin,
     getProfile,
     logout,
