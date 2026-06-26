@@ -16,6 +16,12 @@ const BILI_REQUEST_TIMEOUT_MS = 15000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
 const VIDEO_VIEW_CONCURRENCY = 6
+const FAVORITE_CACHE_TTL_MS = 10 * 60 * 1000
+const SEARCH_DEFAULT_LIMIT = 30
+const SEARCH_PAGE_SIZE = 20
+const SEARCH_VIEW_CONCURRENCY = 6
+const COOKIE_REFRESH_TIMEOUT_MS = 10000
+const COOKIE_REFRESH_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const WBI_MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
   27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
@@ -28,6 +34,7 @@ let proxyServer = null
 let proxyPort = 0
 const proxyTokens = new Map()
 const favoriteTrackCache = new Map()
+let cookieRefreshCheckedAt = 0
 
 export async function activate(context) {
   pluginContext = context
@@ -35,7 +42,7 @@ export async function activate(context) {
   await context.twilight.providers.register({
     id: PROVIDER_ID,
     name: 'Bilibili',
-    capabilities: ['login', 'playlist', 'library', 'playbackUrl', 'cover'],
+    capabilities: ['login', 'playlist', 'library', 'search', 'playbackUrl', 'cover'],
     ui: {
       icon: 'pi pi-video',
       color: '#00a1d6',
@@ -44,7 +51,7 @@ export async function activate(context) {
       loginInstructions: '请使用哔哩哔哩 App 扫码登录',
       qrStatusCodes: { waiting: 86101, scanned: 86090, expired: 86038, success: 0 },
       streamingLibraryTab: true,
-      streamingSearch: false
+      streamingSearch: true
     },
     checkLogin,
     getProfile,
@@ -53,6 +60,7 @@ export async function activate(context) {
     checkQrLogin,
     fetchUserLibrary,
     fetchPlaylistTracks,
+    searchSongs,
     getPlaybackUrl
   })
   await context.twilight.ui.register({
@@ -68,6 +76,7 @@ export async function activate(context) {
 export async function deactivate() {
   proxyTokens.clear()
   favoriteTrackCache.clear()
+  cookieRefreshCheckedAt = 0
   if (proxyServer) {
     await new Promise((resolve) => proxyServer.close(resolve))
     proxyServer = null
@@ -83,7 +92,9 @@ async function checkLogin() {
     const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie: auth.cookie })
     const data = nav.data
     if (!data?.isLogin) return { loggedIn: false, profile: null }
-    return { loggedIn: true, profile: await mapProfile(data, auth.cookie) }
+    const refreshed = await refreshCookieIfNeeded(auth)
+    const cookie = refreshed?.cookie || auth.cookie
+    return { loggedIn: true, profile: await mapProfile(data, cookie) }
   } catch (error) {
     logWarn(`Bilibili login check failed: ${errorToMessage(error)}`)
     return { loggedIn: false, profile: null }
@@ -101,6 +112,7 @@ async function logout() {
   await requireContext().settings.delete(SETTINGS_PINNED_FAVORITES_KEY)
   proxyTokens.clear()
   favoriteTrackCache.clear()
+  cookieRefreshCheckedAt = 0
 }
 
 async function getQrLogin() {
@@ -132,6 +144,7 @@ async function checkQrLogin(key) {
       refreshToken: typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : '',
       updatedAt: new Date().toISOString()
     })
+    cookieRefreshCheckedAt = 0
     logInfo('Bilibili login succeeded')
   }
   return { code, message: typeof json?.data?.message === 'string' ? json.data.message : '' }
@@ -168,7 +181,8 @@ async function fetchUserLibrary() {
 
 async function fetchPlaylistTracks(playlistId, force = false) {
   const cacheKey = String(playlistId)
-  if (!force && favoriteTrackCache.has(cacheKey)) return favoriteTrackCache.get(cacheKey) ?? []
+  const cached = favoriteTrackCache.get(cacheKey)
+  if (!force && cached && isCacheEntryFresh(cached, Date.now())) return cached.tracks
 
   const { cookie } = await requireLoggedIn()
   const tracks = []
@@ -184,21 +198,50 @@ async function fetchPlaylistTracks(playlistId, force = false) {
     const albumName = typeof response.data?.info?.title === 'string' ? response.data.info.title : 'Bilibili'
     const playableMedias = medias.filter((media) => media?.type === 2 && media?.attr === 0)
     const mappedTracks = await mapWithConcurrency(playableMedias, VIDEO_VIEW_CONCURRENCY, (media) =>
-      mapMediaToTrack(media, albumName, cookie)
+      mapMediaToTracks(media, albumName, cookie)
     )
-    tracks.push(...mappedTracks.filter(Boolean))
+    tracks.push(...mappedTracks.flat().filter(Boolean))
     if (!response.data?.has_more || medias.length === 0) break
   }
-  favoriteTrackCache.set(cacheKey, tracks)
+  favoriteTrackCache.set(cacheKey, { tracks, expiresAt: Date.now() + FAVORITE_CACHE_TTL_MS })
   return tracks
+}
+
+async function searchSongs(keywords, limit = SEARCH_DEFAULT_LIMIT, offset = 0) {
+  const keyword = String(keywords || '').trim()
+  if (!keyword) return { items: [], total: 0 }
+  const { cookie } = await requireLoggedIn()
+  const keys = await getWbiKeys(cookie)
+  const limitNumber = Math.max(1, Number(limit) || SEARCH_DEFAULT_LIMIT)
+  const offsetNumber = Math.max(0, Number(offset) || 0)
+  const page = Math.floor(offsetNumber / SEARCH_PAGE_SIZE) + 1
+  const query = encodeWbiWithKeys(
+    {
+      keyword,
+      search_type: 'video',
+      page,
+      page_size: SEARCH_PAGE_SIZE,
+      order: '',
+      duration: 0,
+      tids: 0
+    },
+    keys
+  )
+  const url = `https://api.bilibili.com/x/web-interface/wbi/search/type?${query}`
+  const response = await biliJson(url, { cookie })
+  const results = Array.isArray(response.data?.result) ? response.data.result : []
+  const total = Number(response.data?.pageInfo?.total ?? results.length)
+  const items = await mapWithConcurrency(results.slice(0, limitNumber), SEARCH_VIEW_CONCURRENCY, (item) =>
+    mapSearchResultToTrack(item, cookie)
+  )
+  return { items: items.filter(Boolean), total }
 }
 
 async function getPlaybackUrl(track) {
   const { cookie } = await requireLoggedIn()
   const ids = parseBiliTrackId(track?.id || track?.filePath)
   if (!ids) throw new Error('Bilibili track id 无效')
-  const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie })
-  const keys = extractWbiKeys(nav.data?.wbi_img)
+  const keys = await getWbiKeys(cookie)
   const progressiveQuery = encodeWbiWithKeys(
     {
       bvid: ids.bvid,
@@ -249,16 +292,30 @@ async function getPlaybackUrl(track) {
   return `http://127.0.0.1:${proxyPort}/stream/${token}`
 }
 
-async function mapMediaToTrack(media, albumName, cookie) {
+async function mapMediaToTracks(media, albumName, cookie) {
   const bvid = typeof media.bvid === 'string' ? media.bvid : typeof media.bv_id === 'string' ? media.bv_id : ''
-  if (!bvid) return null
-  const view = extractMediaCid(media) ? null : await getVideoView(bvid, cookie).catch((error) => {
+  if (!bvid) return []
+  const directCid = extractMediaCid(media)
+  const view = directCid ? null : await getVideoView(bvid, cookie).catch((error) => {
     logWarn(`Skipping Bilibili media ${bvid}: ${errorToMessage(error)}`)
     return null
   })
-  const page = Array.isArray(view?.pages) ? view.pages[0] : null
-  const cid = extractMediaCid(media) ?? Number(page?.cid ?? view?.cid)
-  if (!Number.isFinite(cid)) return null
+  const pages = Array.isArray(view?.pages) ? view.pages : []
+  if (pages.length > 1) {
+    const coverProxy = typeof media.cover === 'string' && media.cover
+      ? await createImageProxyUrl(media.cover, cookie)
+      : null
+    return pages
+      .map((page) => {
+        const track = mapPageToTrack(media, { bvid, page, albumName })
+        if (track && coverProxy) track.cover = coverProxy
+        return track
+      })
+      .filter(Boolean)
+  }
+  const page = pages[0] ?? null
+  const cid = directCid ?? Number(page?.cid ?? view?.cid)
+  if (!Number.isFinite(cid) || cid <= 0) return []
   const track = mapBiliMediaToTrack(media, {
     bvid,
     cid,
@@ -266,6 +323,56 @@ async function mapMediaToTrack(media, albumName, cookie) {
     duration: Number(page?.duration ?? media.duration) || 0,
     albumName
   })
+  if (track.cover) {
+    track.cover = await createImageProxyUrl(track.cover, cookie)
+  }
+  return [track]
+}
+
+export function mapPageToTrack(media, options) {
+  const bvid = options.bvid || (typeof media.bvid === 'string' ? media.bvid : '')
+  const cid = Number(options.page?.cid)
+  if (!Number.isFinite(cid) || cid <= 0) return null
+  const partName = typeof options.page?.part === 'string' && options.page.part.trim()
+    ? options.page.part
+    : `P${Number(options.page?.page) || 1}`
+  const baseTitle = String(media.title || 'Bilibili 视频')
+  return mapBiliMediaToTrack(media, {
+    bvid,
+    cid,
+    title: `${baseTitle} - ${partName}`,
+    duration: Number(options.page?.duration) || Number(media.duration) || 0,
+    albumName: options.albumName
+  })
+}
+
+async function mapSearchResultToTrack(item, cookie) {
+  const bvid = typeof item.bvid === 'string' ? item.bvid : ''
+  if (!bvid) return null
+  const view = await getVideoView(bvid, cookie).catch((error) => {
+    logWarn(`Skipping Bilibili search result ${bvid}: ${errorToMessage(error)}`)
+    return null
+  })
+  const page = Array.isArray(view?.pages) ? view.pages[0] : null
+  const cid = Number(page?.cid ?? view?.cid)
+  if (!Number.isFinite(cid) || cid <= 0) return null
+  const title = stripHtml(item.title)
+  const durationSeconds = parseDurationToSeconds(item.duration)
+  const track = mapBiliMediaToTrack(
+    {
+      title,
+      cover: item.pic,
+      duration: durationSeconds,
+      upper: { name: item.author || item.upman }
+    },
+    {
+      bvid,
+      cid,
+      title: typeof page?.part === 'string' && page.part.trim() ? `${title} - ${page.part}` : title,
+      duration: Number(page?.duration) || durationSeconds || 0,
+      albumName: 'Bilibili 搜索'
+    }
+  )
   if (track.cover) {
     track.cover = await createImageProxyUrl(track.cover, cookie)
   }
@@ -277,6 +384,11 @@ async function getVideoView(bvid, cookie) {
   url.searchParams.set('bvid', bvid)
   const response = await biliJson(url, { cookie })
   return response.data
+}
+
+async function getWbiKeys(cookie) {
+  const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie })
+  return extractWbiKeys(nav.data?.wbi_img)
 }
 
 export function extractMediaCid(media) {
@@ -313,6 +425,56 @@ async function fetchWithTimeout(input, options = {}, timeoutMs = BILI_REQUEST_TI
     throw error
   } finally {
     clearTimeout(timer)
+  }
+}
+
+async function refreshCookieIfNeeded(auth) {
+  if (Date.now() - cookieRefreshCheckedAt < COOKIE_REFRESH_CHECK_INTERVAL_MS) return null
+  cookieRefreshCheckedAt = Date.now()
+  const biliJct = extractCookieValue(auth.cookie, 'bili_jct')
+  if (!biliJct || !auth.refreshToken) return null
+  try {
+    const infoUrl = new URL('https://passport.bilibili.com/x/passport-login/web/cookie/info')
+    infoUrl.searchParams.set('csrf', biliJct)
+    const info = await biliJson(infoUrl, { cookie: auth.cookie }, COOKIE_REFRESH_TIMEOUT_MS)
+    if (!info?.data?.refresh) return null
+    const refreshCsrf = typeof info.data.refresh_csrf === 'string' ? info.data.refresh_csrf : ''
+    if (!refreshCsrf) {
+      logWarn('Bilibili cookie refresh requested but refresh_csrf missing')
+      return null
+    }
+    const refreshUrl = new URL('https://passport.bilibili.com/x/passport-login/web/cookie/refresh')
+    refreshUrl.searchParams.set('csrf', biliJct)
+    refreshUrl.searchParams.set('refresh_csrf', refreshCsrf)
+    refreshUrl.searchParams.set('source', 'main_web')
+    const refreshResponse = await fetchWithTimeout(
+      refreshUrl,
+      { headers: defaultHeaders(auth.cookie) },
+      COOKIE_REFRESH_TIMEOUT_MS
+    )
+    const refreshJson = await refreshResponse.json()
+    if (refreshJson?.code !== 0) {
+      logWarn(`Bilibili cookie refresh rejected: ${refreshJson?.message || refreshJson?.code}`)
+      return null
+    }
+    const setCookies = parseSetCookies(getSetCookieHeaders(refreshResponse.headers))
+    const mergedCookie = mergeRefreshedCookies(auth.cookie, setCookies)
+    if (!mergedCookie.includes('SESSDATA=')) {
+      logWarn('Bilibili cookie refresh succeeded but SESSDATA missing')
+      return null
+    }
+    const nextRefreshToken =
+      typeof refreshJson?.data?.refresh_token === 'string' ? refreshJson.data.refresh_token : auth.refreshToken
+    await requireContext().settings.set(SETTINGS_AUTH_KEY, {
+      cookie: mergedCookie,
+      refreshToken: nextRefreshToken,
+      updatedAt: new Date().toISOString()
+    })
+    logInfo('Bilibili cookie refreshed silently')
+    return { cookie: mergedCookie, refreshToken: nextRefreshToken }
+  } catch (error) {
+    logWarn(`Bilibili cookie refresh skipped: ${errorToMessage(error)}`)
+    return null
   }
 }
 
@@ -362,7 +524,8 @@ async function requireLoggedIn() {
   if (!auth?.cookie) throw new Error('请先登录 Bilibili')
   const login = await checkLogin()
   if (!login.loggedIn || !login.profile) throw new Error('Bilibili 登录已失效，请重新登录')
-  return { cookie: auth.cookie, profile: login.profile }
+  const refreshedAuth = await readAuth()
+  return { cookie: refreshedAuth?.cookie || auth.cookie, profile: login.profile }
 }
 
 async function readAuth() {
@@ -537,6 +700,62 @@ function mergeCookieString(cookies) {
     .filter(([, value]) => value)
     .map(([name, value]) => `${name}=${value}`)
     .join('; ')
+}
+
+export function extractCookieValue(cookie, name) {
+  if (typeof cookie !== 'string' || !cookie || typeof name !== 'string' || !name) return ''
+  const target = `${name}=`
+  for (const part of cookie.split(';')) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith(target)) return trimmed.slice(target.length)
+  }
+  return ''
+}
+
+export function mergeRefreshedCookies(oldCookie, setCookieMap) {
+  const map = parseCookieStringToMap(oldCookie)
+  for (const [name, value] of Object.entries(setCookieMap || {})) {
+    if (name && value) map[name] = value
+  }
+  return Object.entries(map)
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ')
+}
+
+function parseCookieStringToMap(cookie) {
+  const map = {}
+  if (typeof cookie !== 'string') return map
+  for (const part of cookie.split(';')) {
+    const trimmed = part.trim()
+    if (!trimmed) continue
+    const idx = trimmed.indexOf('=')
+    if (idx <= 0) continue
+    const name = trimmed.slice(0, idx).trim()
+    const value = trimmed.slice(idx + 1).trim()
+    if (name) map[name] = value
+  }
+  return map
+}
+
+export function isCacheEntryFresh(entry, now = Date.now()) {
+  if (!entry || typeof entry !== 'object') return false
+  if (typeof entry.expiresAt !== 'number') return false
+  return entry.expiresAt > now
+}
+
+export function stripHtml(value) {
+  return String(value ?? '').replace(/<[^>]*>/g, '')
+}
+
+export function parseDurationToSeconds(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value !== 'string' || !value) return 0
+  const parts = value.split(':').map((part) => Number(part) || 0)
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return 0
 }
 
 export function sortFavoriteFolders(list, pinnedFavoriteFolderIds = []) {
