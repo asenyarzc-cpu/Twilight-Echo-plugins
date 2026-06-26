@@ -50,8 +50,7 @@ export async function activate(context) {
       authType: 'qr',
       loginInstructions: '请使用哔哩哔哩 App 扫码登录',
       qrStatusCodes: { waiting: 86101, scanned: 86090, expired: 86038, success: 0 },
-      streamingLibraryTab: true,
-      streamingSearch: true
+      streamingLibraryTab: false
     },
     checkLogin,
     getProfile,
