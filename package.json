@@ -6,8 +6,10 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "test": "node --test plugins/*/*.test.mjs",
-    "pack": "node scripts/pack-plugin.cjs bilibili-provider",
-    "pack:bilibili": "node scripts/pack-plugin.cjs bilibili-provider"
+    "test": "node --test plugins/*/*.test.mjs scripts/*.test.mjs",
+    "index": "node scripts/generate-index.mjs",
+    "validate:index": "node scripts/generate-index.mjs --validate",
+    "pack": "node scripts/pack-plugin.cjs bilibili-provider && npm run index",
+    "pack:bilibili": "node scripts/pack-plugin.cjs bilibili-provider && npm run index"
   }
 }

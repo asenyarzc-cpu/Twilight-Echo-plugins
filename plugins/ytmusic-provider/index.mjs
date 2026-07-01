@@ -7,6 +7,11 @@ const PROVIDER_ID = 'ytm'
 const SETTINGS_COOKIE_KEY = 'cookie'
 const SETTINGS_INNERTUBE_KEY = 'innertube'
 const SETTINGS_OAUTH_TOKEN_KEY = 'oauth_token'
+const SETTINGS_OAUTH_CLIENT_KEY = 'oauth_client'
+const SETTINGS_ACCOUNT_COMMAND = 'ytmusic.accountSettings'
+const SETTINGS_HELP_COMMAND = 'ytmusic.settingsHelp'
+const COOKIE_LIBRARY_LOGIN_MESSAGE =
+  'YouTube Music 音乐库需要浏览器 Cookie 登录；当前 OAuth 登录只能读取账号资料，不能访问 YouTube Music InnerTube 私人资料库。请打开 YouTube Music 账号设置页导入浏览器 Cookie。'
 
 const YTM_DOMAIN = 'https://music.youtube.com'
 const YT_BASE = 'https://www.youtube.com'
@@ -18,13 +23,15 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
 const REQUEST_TIMEOUT_MS = 15000
 const STREAM_PROXY_TOKEN_TTL_MS = 6 * 60 * 1000
+const SETTINGS_BODY_LIMIT_BYTES = 128 * 1024
 
 // OAuth 2.0 Device Code Grant — auto-discovers client credentials from YouTube TV
 // Approach ported from youtubei.js (LuanRT/YouTube.js) OAuth2.ts
-const OAUTH_SCOPE = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content'
+const OAUTH_SCOPE = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content openid profile email'
 const OAUTH_CODE_URL = 'https://www.youtube.com/o/oauth2/device/code'
 const OAUTH_TOKEN_URL = 'https://www.youtube.com/o/oauth2/token'
 const OAUTH_REVOKE_URL = 'https://www.youtube.com/o/oauth2/revoke'
+const OAUTH_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo'
 const YTTV_URL = 'https://www.youtube.com/tv'
 const YTTV_UA = 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version'
 
@@ -761,6 +768,9 @@ const playlistTrackCache = new Map()
 let oauthToken = null // { access_token, refresh_token, expires_at, scope, token_type }
 let oauthDeviceFlow = null // { device_code, user_code, verification_url, expires_at, interval }
 let oauthClient = null // { client_id, client_secret } — auto-discovered from YouTube TV
+let settingsServer = null
+let settingsPort = 0
+let settingsToken = ''
 
 // ─── Plugin Lifecycle ───────────────────────────────────────────────────
 export async function activate(context) {
@@ -769,6 +779,7 @@ export async function activate(context) {
 
   // Load stored OAuth token (auto-refresh if expiring)
   try {
+    oauthClient = await getStoredOAuthClient()
     const storedToken = await context.settings.get(SETTINGS_OAUTH_TOKEN_KEY)
     if (storedToken && typeof storedToken === 'object' && storedToken.access_token) {
       oauthToken = storedToken
@@ -781,13 +792,21 @@ export async function activate(context) {
   await context.twilight.providers.register({
     id: PROVIDER_ID,
     name: 'YouTube Music',
-    capabilities: ['search', 'playbackUrl', 'lyrics', 'cover', 'playlist', 'library', 'login'],
+    capabilities: [
+      'search',
+      'playbackUrl',
+      'lyrics',
+      'cover',
+      'playlist',
+      'library',
+      'login'
+    ],
     ui: {
       icon: 'pi pi-youtube',
       color: '#FF0000',
       description: '谷歌音乐流媒体',
       authType: 'oauth',
-      loginInstructions: '请在浏览器中登录 Google 账号并授权',
+      loginInstructions: 'OAuth 仅用于账号资料识别；私人音乐库请在 YouTube Music 账号设置页导入浏览器 Cookie',
       qrStatusCodes: { waiting: -2, scanned: null, expired: -3, denied: -4, success: 0 },
       showBrowserButton: true,
       streamingLibraryTab: true,
@@ -810,8 +829,20 @@ export async function activate(context) {
     id: 'ytmusic-settings',
     kind: 'settingsPanel',
     title: 'YouTube Music 账号',
-    description: '导入浏览器 Cookie 以启用 YouTube Music 搜索与播放'
+    description: 'OAuth 可显示账号资料；音乐库需要导入浏览器 Cookie',
+    command: SETTINGS_HELP_COMMAND
   })
+  await context.twilight.ui.register({
+    id: 'ytmusic-account',
+    kind: 'sidebarPage',
+    title: 'YouTube Music 账号',
+    description: '导入 Cookie 以启用私人音乐库',
+    icon: 'pi pi-youtube',
+    command: SETTINGS_ACCOUNT_COMMAND,
+    renderMode: 'html'
+  })
+  context.twilight.ui.onCommand?.(SETTINGS_HELP_COMMAND, getSettingsHelp)
+  context.twilight.ui.onCommand?.(SETTINGS_ACCOUNT_COMMAND, renderAccountSettingsPage)
 }
 
 export async function deactivate() {
@@ -823,6 +854,12 @@ export async function deactivate() {
   oauthToken = null
   oauthDeviceFlow = null
   oauthClient = null
+  settingsToken = ''
+  if (settingsServer) {
+    await new Promise((resolve) => settingsServer.close(resolve))
+    settingsServer = null
+    settingsPort = 0
+  }
   if (proxyServer) {
     await new Promise((resolve) => proxyServer.close(resolve))
     proxyServer = null
@@ -857,6 +894,250 @@ async function getStoredInnertube() {
 
 async function saveInnertube(config) {
   await getContext().settings.set(SETTINGS_INNERTUBE_KEY, config)
+}
+
+async function getStoredOAuthClient() {
+  const value = await getContext().settings.get(SETTINGS_OAUTH_CLIENT_KEY)
+  if (!value || typeof value !== 'object') return null
+  const clientId = typeof value.client_id === 'string' ? value.client_id.trim() : ''
+  const clientSecret = typeof value.client_secret === 'string' ? value.client_secret.trim() : ''
+  if (!clientId || !clientSecret) return null
+  return { client_id: clientId, client_secret: clientSecret }
+}
+
+async function saveOAuthClient(client) {
+  if (client?.client_id && client?.client_secret) {
+    oauthClient = {
+      client_id: client.client_id.trim(),
+      client_secret: client.client_secret.trim()
+    }
+    await getContext().settings.set(SETTINGS_OAUTH_CLIENT_KEY, oauthClient)
+  } else {
+    oauthClient = null
+    await getContext().settings.delete(SETTINGS_OAUTH_CLIENT_KEY)
+  }
+}
+
+async function getSettingsHelp() {
+  const cookie = await getCookie()
+  const hasCookieAuth = Boolean(getSapisid(cookie))
+  const hasOauth = Boolean(oauthToken?.access_token)
+  const hasCustomClient = Boolean(await getStoredOAuthClient())
+  return [
+    `OAuth 登录状态：${hasOauth ? '已登录，可用于账号资料识别' : '未登录'}`,
+    `音乐库 Cookie：${hasCookieAuth ? '已导入，可访问私人音乐库' : '未导入，私人音乐库不可用'}`,
+    `高级 OAuth client：${hasCustomClient ? '已配置' : '未配置'}`,
+    '请从侧边栏打开“YouTube Music 账号”页面导入浏览器 Cookie。'
+  ].join('\n')
+}
+
+async function renderAccountSettingsPage() {
+  const endpoint = await ensureSettingsServer()
+  const cookie = await getCookie()
+  const oauthClientConfigured = Boolean(await getStoredOAuthClient())
+  const cookieStatus = getSapisid(cookie)
+    ? '已导入 Cookie，音乐库可用。'
+    : '未导入 Cookie，私人音乐库不可用。'
+  const oauthStatus = oauthToken?.access_token
+    ? 'OAuth 已登录：可用于显示账号资料，但不会解锁私人音乐库。'
+    : 'OAuth 未登录：如需显示账号资料，可使用登录按钮授权。'
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; padding: 22px; background: #f7f8fa; color: #15171a; }
+    main { max-width: 780px; margin: 0 auto; display: grid; gap: 18px; }
+    section { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 18px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    p { margin: 6px 0; line-height: 1.55; }
+    label { display: grid; gap: 6px; margin: 12px 0; font-size: 13px; font-weight: 600; }
+    textarea, input { width: 100%; box-sizing: border-box; border: 1px solid #cfd5dd; border-radius: 7px; padding: 10px; font: 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    textarea { min-height: 150px; resize: vertical; }
+    button { border: 0; border-radius: 7px; background: #d71920; color: #fff; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+    .muted { color: #59616d; font-size: 13px; }
+    .status { border-left: 3px solid #d71920; padding-left: 10px; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111317; color: #f5f6f7; }
+      section { background: #181b20; border-color: #2b3038; }
+      textarea, input { background: #101216; color: #f5f6f7; border-color: #3a414c; }
+      .muted { color: #a8b0bb; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>YouTube Music 账号</h1>
+      <p class="status">${escapeHtml(cookieStatus)}</p>
+      <p class="muted">${escapeHtml(oauthStatus)}</p>
+      <p class="muted">高级 OAuth client：${oauthClientConfigured ? '已配置' : '未配置'}</p>
+    </section>
+    <section>
+      <h2>导入浏览器 Cookie</h2>
+      <p class="muted">在浏览器登录 music.youtube.com 后，粘贴原始 Cookie，或粘贴开发者工具里复制的完整请求头。内容必须包含 SAPISID 或 __Secure-3PAPISID。</p>
+      <form method="post" action="${escapeHtml(endpoint)}">
+        <label>
+          Cookie 或完整请求头
+          <textarea name="cookie" autocomplete="off" spellcheck="false" placeholder="Cookie: SID=...; __Secure-3PAPISID=..."></textarea>
+        </label>
+        <h2>高级 OAuth client（可选）</h2>
+        <p class="muted">仅用于替代自动发现的 YouTube TV OAuth client。它不会默认解锁私人音乐库。</p>
+        <label>
+          client_id
+          <input name="oauth_client_id" autocomplete="off" placeholder="Google Cloud OAuth client_id">
+        </label>
+        <label>
+          client_secret
+          <input name="oauth_client_secret" type="password" autocomplete="off" placeholder="Google Cloud OAuth client_secret">
+        </label>
+        <button type="submit">保存</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>`
+}
+
+async function ensureSettingsServer() {
+  if (settingsServer && settingsPort > 0 && settingsToken) {
+    return `http://127.0.0.1:${settingsPort}/ytmusic/settings?token=${encodeURIComponent(settingsToken)}`
+  }
+  settingsToken = randomBytes(24).toString('hex')
+  settingsServer = createServer((request, response) => {
+    void handleSettingsRequest(request, response)
+  })
+  await new Promise((resolve, reject) => {
+    settingsServer.once('error', reject)
+    settingsServer.listen(0, '127.0.0.1', () => {
+      settingsServer.off('error', reject)
+      const address = settingsServer.address()
+      settingsPort = typeof address === 'object' && address ? address.port : 0
+      resolve()
+    })
+  })
+  return `http://127.0.0.1:${settingsPort}/ytmusic/settings?token=${encodeURIComponent(settingsToken)}`
+}
+
+async function handleSettingsRequest(request, response) {
+  try {
+    const url = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`)
+    if (url.pathname !== '/ytmusic/settings') {
+      sendSettingsResponse(response, 404, '设置入口不存在')
+      return
+    }
+    if (request.method !== 'POST') {
+      sendSettingsResponse(response, 405, '请通过设置页提交表单')
+      return
+    }
+    if (url.searchParams.get('token') !== settingsToken) {
+      sendSettingsResponse(response, 403, '设置令牌无效，请重新打开 YouTube Music 账号页面')
+      return
+    }
+    if (!isAllowedSettingsOrigin(request.headers.origin)) {
+      sendSettingsResponse(response, 403, '拒绝非本地设置页提交')
+      return
+    }
+
+    const body = await readSettingsBody(request)
+    const params = new URLSearchParams(body)
+    const cookieInput = String(params.get('cookie') || '')
+    const oauthClientId = String(params.get('oauth_client_id') || '').trim()
+    const oauthClientSecret = String(params.get('oauth_client_secret') || '').trim()
+    const hasOauthClientInput = Boolean(oauthClientId || oauthClientSecret)
+    const normalizedCookie = normalizeCookieInput(cookieInput)
+
+    if (cookieInput.trim()) {
+      if (!normalizedCookie || !getSapisid(normalizedCookie)) {
+        sendSettingsResponse(response, 400, 'Cookie 中缺少 SAPISID 或 __Secure-3PAPISID，无法访问 YouTube Music 私人音乐库')
+        return
+      }
+      await saveCookie(normalizedCookie)
+      await getContext().settings.delete(SETTINGS_INNERTUBE_KEY)
+      innertubeConfig = null
+      playerCache = null
+      streamUrlCache.clear()
+      playlistTrackCache.clear()
+    }
+
+    if (hasOauthClientInput) {
+      if (!oauthClientId || !oauthClientSecret) {
+        sendSettingsResponse(response, 400, '高级 OAuth client_id 和 client_secret 必须同时填写')
+        return
+      }
+      await saveOAuthClient({ client_id: oauthClientId, client_secret: oauthClientSecret })
+    }
+
+    if (!cookieInput.trim() && !hasOauthClientInput) {
+      sendSettingsResponse(response, 400, '请填写 Cookie 或高级 OAuth client 信息')
+      return
+    }
+
+    sendSettingsResponse(response, 200, 'YouTube Music 账号设置已保存。请回到 Twilight Echo，必要时刷新音乐库。')
+  } catch (err) {
+    sendSettingsResponse(response, 500, `保存失败：${errorToMessage(err)}`)
+  }
+}
+
+function isAllowedSettingsOrigin(origin) {
+  if (!origin || origin === 'null') return true
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin)
+}
+
+function readSettingsBody(request) {
+  return new Promise((resolve, reject) => {
+    let body = ''
+    let size = 0
+    request.setEncoding('utf8')
+    request.on('data', (chunk) => {
+      size += Buffer.byteLength(chunk, 'utf8')
+      if (size > SETTINGS_BODY_LIMIT_BYTES) {
+        reject(new Error('提交内容过大'))
+        request.destroy()
+        return
+      }
+      body += chunk
+    })
+    request.on('end', () => resolve(body))
+    request.on('error', reject)
+  })
+}
+
+function sendSettingsResponse(response, status, message) {
+  const body = `<!doctype html><meta charset="utf-8"><title>YouTube Music 设置</title><body style="font-family:system-ui,sans-serif;padding:24px;line-height:1.6"><h1>${status >= 400 ? '保存失败' : '保存成功'}</h1><p>${escapeHtml(message)}</p></body>`
+  response.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store'
+  })
+  response.end(body)
+}
+
+function normalizeCookieInput(input) {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const cookieLine = raw.match(/(?:^|\r?\n)\s*cookie\s*:\s*([^\r\n]+)/i)
+    || raw.match(/-H\s+['"]cookie\s*:\s*([^'"]+)['"]/i)
+  const cookie = cookieLine ? cookieLine[1] : raw.replace(/^cookie\s*:\s*/i, '')
+  return cookie
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('; ')
+    .replace(/\s*;\s*/g, '; ')
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 // ─── InnerTube Initialization (ported from helpers.py) ──────────────────
@@ -981,12 +1262,6 @@ async function innertubePost(endpoint, body = {}, usePlayerBase = false, additio
   const sapisid = getSapisid(cookie)
   if (sapisid) {
     headers.Authorization = getAuthorization(sapisid, YTM_DOMAIN)
-  }
-
-  // Use OAuth Bearer token if available (takes precedence over SAPISIDHASH)
-  if (oauthToken && oauthToken.access_token) {
-    headers.Authorization = `Bearer ${oauthToken.access_token}`
-    headers['X-Goog-Request-Time'] = String(Math.floor(Date.now() / 1000))
   }
 
   const response = await fetchWithTimeout(url, {
@@ -1426,7 +1701,7 @@ function extractLyricsText(data) {
 // ─── Library & Playlists (ported from mixins/library.py, playlists.py) ──
 async function fetchUserLibrary() {
   const cookie = await getCookie()
-  if (!cookie && !oauthToken) throw new Error('Please login to YouTube Music first')
+  if (!getSapisid(cookie)) throw new Error(COOKIE_LIBRARY_LOGIN_MESSAGE)
 
   const data = await innertubePost('browse', { browseId: 'FEmusic_liked_playlists' })
 
@@ -1475,7 +1750,9 @@ async function fetchPlaylistTracks(playlistId, force = false) {
   }
 
   const cookie = await getCookie()
-  if (!cookie && !oauthToken) throw new Error('Please login to YouTube Music first')
+  if (playlistId === 'LM' && !getSapisid(cookie)) {
+    throw new Error(COOKIE_LIBRARY_LOGIN_MESSAGE)
+  }
 
   const tracks = []
   const validatedId = validatePlaylistId(playlistId)
@@ -1538,12 +1815,31 @@ async function checkLogin() {
   if (oauthToken && oauthToken.access_token) {
     await ensureFreshOAuthToken()
     if (oauthToken && oauthToken.access_token) {
+      if (!hasOAuthProfileScope(oauthToken)) {
+        logWarn('YouTube Music OAuth token is missing profile scope; please log in again to show account details')
+        return {
+          loggedIn: true,
+          profile: {
+            ...getFallbackOAuthProfile(),
+            signature: '请重新登录以显示真实账号资料'
+          }
+        }
+      }
+
+      try {
+        const profile = await fetchOAuthUserInfo()
+        if (profile) return { loggedIn: true, profile }
+      } catch (error) {
+        logWarn(`YouTube Music OAuth userinfo fetch failed: ${errorToMessage(error)}`)
+      }
+
       try {
         const profile = await fetchAccountInfo()
         if (profile) return { loggedIn: true, profile }
-      } catch {
-        // Token might be invalid, fall through to cookie check
+      } catch (error) {
+        logWarn(`YouTube Music OAuth profile fetch failed: ${errorToMessage(error)}`)
       }
+      return { loggedIn: true, profile: getFallbackOAuthProfile() }
     }
   }
 
@@ -1564,6 +1860,42 @@ async function checkLogin() {
       return { loggedIn: true, profile: { nickname: 'YouTube Music 用户', userId: '', avatarUrl: '' } }
     }
     return { loggedIn: false, profile: null }
+  }
+}
+
+function getFallbackOAuthProfile() {
+  return { nickname: 'YouTube Music 用户', userId: '', avatarUrl: '' }
+}
+
+function hasOAuthProfileScope(token) {
+  const scope = typeof token?.scope === 'string' ? token.scope : ''
+  const scopes = new Set(scope.split(/\s+/).filter(Boolean))
+  return scopes.has('profile') || scopes.has('openid') || scopes.has('https://www.googleapis.com/auth/userinfo.profile')
+}
+
+async function fetchOAuthUserInfo() {
+  if (!oauthToken?.access_token) return null
+  const response = await fetchWithTimeout(OAUTH_USERINFO_URL, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${oauthToken.access_token}`
+    }
+  })
+  if (!response.ok) {
+    throw new Error(`Google OAuth userinfo request failed: HTTP ${response.status}`)
+  }
+  const data = await response.json()
+  const nickname =
+    typeof data?.name === 'string' && data.name.trim()
+      ? data.name.trim()
+      : typeof data?.email === 'string' && data.email.trim()
+        ? data.email.trim()
+        : ''
+  if (!nickname) return null
+  return {
+    nickname,
+    userId: typeof data?.sub === 'string' ? data.sub : '',
+    avatarUrl: typeof data?.picture === 'string' ? data.picture : ''
   }
 }
 
@@ -1610,6 +1942,15 @@ async function logout() {
 // Auto-discovers client credentials from YouTube TV page (no user config needed).
 // Approach ported from youtubei.js (LuanRT/YouTube.js) OAuth2.ts.
 // Flow: discoverClient → get_device_code → user visits URL → poll token → store
+
+async function getOAuthClient() {
+  const storedClient = await getStoredOAuthClient()
+  if (storedClient) {
+    oauthClient = storedClient
+    return storedClient
+  }
+  return discoverOAuthClient()
+}
 
 // Step 0: Auto-discover OAuth client_id/secret from YouTube TV page
 async function discoverOAuthClient() {
@@ -1662,8 +2003,8 @@ async function discoverOAuthClient() {
 }
 
 async function getQrLogin() {
-  // Auto-discover OAuth client credentials (no user config needed)
-  const client = await discoverOAuthClient()
+  // Prefer user-provided OAuth credentials; fall back to auto-discovered TV credentials.
+  const client = await getOAuthClient()
 
   // Request device code
   const codeResponse = await fetchWithTimeout(OAUTH_CODE_URL, {
@@ -1720,7 +2061,7 @@ async function checkQrLogin(key) {
     return { code: -1, message: '设备码不匹配' }
   }
 
-  const client = oauthClient || await discoverOAuthClient().catch(() => null)
+  const client = await getOAuthClient().catch(() => null)
   if (!client) {
     return { code: -1, message: '无法获取 OAuth 客户端凭据' }
   }
@@ -1787,7 +2128,7 @@ async function ensureFreshOAuthToken() {
   const now = Math.floor(Date.now() / 1000)
   if (oauthToken.expires_at && oauthToken.expires_at - now > 60) return
 
-  const client = oauthClient || await discoverOAuthClient().catch(() => null)
+  const client = await getOAuthClient().catch(() => null)
   if (!client) return
 
   try {

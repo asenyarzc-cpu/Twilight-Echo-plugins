@@ -9,12 +9,6 @@ function readArg(name) {
   return index >= 0 ? process.argv[index + 1] : undefined
 }
 
-function relativePackageUrl(packageName) {
-  const baseUrl = process.env.PLUGIN_BASE_URL || readArg('--base-url')
-  if (!baseUrl) return `packages/${packageName}`
-  return `${baseUrl.replace(/\/$/, '')}/${packageName}`
-}
-
 async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, 'utf-8'))
 }
@@ -62,39 +56,10 @@ async function main() {
 
   const buffer = await fs.readFile(packagePath)
   const checksumSha256 = createHash('sha256').update(buffer).digest('hex')
-  const sourceUrl = process.env.PLUGIN_SOURCE_URL || readArg('--source-url') || relativePackageUrl(packageName)
-  const repository =
-    process.env.PLUGIN_REPOSITORY ||
-    readArg('--repository') ||
-    'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins'
-  const homepage = process.env.PLUGIN_HOMEPAGE || readArg('--homepage') || repository
-
-  const indexPath = path.join(repoRoot, 'plugins.json')
-  let index = { schemaVersion: 1, plugins: [] }
-  try {
-    index = await readJson(indexPath)
-  } catch {
-    /* create a new index */
-  }
-  const entry = {
-    ...manifest,
-    sourceUrl,
-    checksumSha256,
-    repository,
-    homepage,
-    tags: manifest.type.includes('provider') ? ['provider', 'ui', 'bilibili'] : manifest.type,
-    verified: true
-  }
-  index.plugins = Array.isArray(index.plugins)
-    ? index.plugins.filter((plugin) => plugin && plugin.id !== manifest.id)
-    : []
-  index.plugins.push(entry)
-  index.plugins.sort((left, right) => String(left.id).localeCompare(String(right.id)))
-  await fs.writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`, 'utf-8')
 
   console.log(`Packed ${packagePath}`)
   console.log(`sha256 ${checksumSha256}`)
-  console.log(`index ${indexPath}`)
+  console.log('Run npm run index to refresh plugins.json')
 }
 
 main().catch((error) => {

@@ -23,7 +23,7 @@
         "ui:inject"
       ],
       "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.7.tep",
-      "checksumSha256": "7b37f47646e5940bd840f5e752eaa9b04d0f988ab9cf46e594084a6cf5c6ee6c",
+      "checksumSha256": "85985c332a662204302150e0aa12f6f2b4dc3ed3f9524aedb06333153b45fab3",
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "tags": [
@@ -36,8 +36,8 @@
     {
       "id": "com.twilightecho.provider.ytmusic",
       "name": "YouTube Music 音源",
-      "version": "0.1.0",
-      "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。支持搜索、播放、歌词和用户歌单。",
+      "version": "1.0.4",
+      "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。基于 ytmusicapi 解析逻辑重构，支持搜索、播放、歌词、歌单和用户媒体库。",
       "author": "Px_asen",
       "license": "Apache-2.0",
       "type": [
@@ -52,9 +52,11 @@
       "permissions": [
         "network",
         "settings",
-        "ui:inject"
+        "ui:inject",
+        "library:read"
       ],
-      "sourceUrl": "packages/com.twilightecho.provider.ytmusic-0.1.0.tep",
+      "sourceUrl": "packages/com.twilightecho.provider.ytmusic-1.0.4.tep",
+      "checksumSha256": "cede81ae8b5e4d99d4c0b433e4e3558031c5594ec389217dad82290b8a3eb75d",
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "tags": [
@@ -62,8 +64,7 @@
         "ui",
         "youtube-music"
       ],
-      "verified": true,
-      "checksumSha256": "4d82e031fa36135a0d7a8cbb76bcf2bc6edfa3b88938f478ebf7e51e5ddcd3b9"
+      "verified": true
     }
   ]
 }

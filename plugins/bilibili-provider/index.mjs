@@ -16,6 +16,7 @@ const BILI_REQUEST_TIMEOUT_MS = 15000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
 const VIDEO_VIEW_CONCURRENCY = 6
+const FAVORITE_COVER_CONCURRENCY = 4
 const FAVORITE_CACHE_TTL_MS = 10 * 60 * 1000
 const SEARCH_DEFAULT_LIMIT = 30
 const SEARCH_PAGE_SIZE = 20
@@ -157,24 +158,59 @@ async function fetchUserLibrary() {
   url.searchParams.set('type', '2')
   const response = await biliJson(url, { cookie })
   const list = Array.isArray(response.data?.list) ? response.data.list : []
-  const playlists = await Promise.all(
-    sortFavoriteFolders(list, pinnedFavoriteFolderIds).map(async (folder) => {
+  const playlists = await mapWithConcurrency(
+    sortFavoriteFolders(list, pinnedFavoriteFolderIds),
+    FAVORITE_COVER_CONCURRENCY,
+    async (folder) => {
       const id = String(folder.id)
+      // Prefer the cover of the first video inside the folder over the
+      // default folder cover returned by the folder-list API.
+      const firstVideoCover = await fetchFavoriteFirstCover(id, cookie)
       return {
         id,
         name: String(folder.title || 'Bilibili 收藏夹'),
         cover:
-          typeof folder.cover === 'string' && folder.cover
+          firstVideoCover ||
+          (typeof folder.cover === 'string' && folder.cover
             ? await createImageProxyUrl(folder.cover, cookie)
-            : null,
+            : null),
         trackCount: Number(folder.media_count) || 0,
         pinned: pinnedFavoriteFolderIds.includes(id)
       }
-    })
+    }
   )
   return {
     likedPlaylist: playlists[0] ?? null,
     playlists
+  }
+}
+
+/**
+ * Fetch the cover of the first video in a favorite folder.
+ * Returns a proxied image URL or null when the folder is empty or the
+ * request fails (caller falls back to the folder default cover).
+ */
+async function fetchFavoriteFirstCover(folderId, cookie) {
+  try {
+    const url = new URL('https://api.bilibili.com/x/v3/fav/resource/list')
+    url.searchParams.set('media_id', String(folderId))
+    url.searchParams.set('ps', '1')
+    url.searchParams.set('pn', '1')
+    url.searchParams.set('type', '0')
+    url.searchParams.set('platform', 'web')
+    const response = await biliJson(url, { cookie })
+    const medias = Array.isArray(response.data?.medias) ? response.data.medias : []
+    const first = medias.find((media) => media?.type === 2 && media?.attr === 0) ?? medias[0]
+    const cover = typeof first?.cover === 'string' && first.cover
+      ? first.cover
+      : typeof first?.pic === 'string' && first.pic
+        ? first.pic
+        : null
+    if (!cover) return null
+    return createImageProxyUrl(cover, cookie)
+  } catch (error) {
+    logWarn(`Bilibili first-cover fetch failed for folder ${folderId}: ${errorToMessage(error)}`)
+    return null
   }
 }
 

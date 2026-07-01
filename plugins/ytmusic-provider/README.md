@@ -15,26 +15,33 @@
 
 ## 认证方式
 
-本插件支持两种认证方式：
+本插件支持两种认证方式。OAuth 登录只用于识别账号资料；YouTube Music 私人音乐库必须使用浏览器 Cookie/SAPISID 认证。
 
-### 方式一：浏览器 Google 登录（推荐）
+### 方式一：浏览器 Google 登录（账号资料）
 
-点击登录后，浏览器会自动打开 Google 授权页面。登录 Google 账号并授权即可，无需任何手动配置。
+点击登录后，浏览器会自动打开 Google 授权页面。登录 Google 账号并授权后，插件可以显示账号资料。
 
 1. 在登录页面点击「YouTube Music」
 2. 浏览器自动打开 Google 登录页面
 3. 登录 Google 账号并点击授权
 4. 回到 Twilight Echo，自动完成登录
 
-> 授权后插件会自动获取 access_token 和 refresh_token，令牌过期时自动刷新，无需重复登录。
+> 授权后插件会自动获取 access_token 和 refresh_token，令牌过期时自动刷新。由于 YouTube Music 当前会拒绝该 OAuth token 访问 `WEB_REMIX` InnerTube 私人资料库，OAuth 登录不会解锁音乐库。
 
-### 方式二：Cookie 导入（备用）
+### 方式二：Cookie 导入（音乐库）
 
-如果浏览器登录不可用，可以手动导入 Cookie：
+如需读取 YouTube Music 私人音乐库，需要手动导入浏览器 Cookie：
 
 1. 在浏览器中访问 [music.youtube.com](https://music.youtube.com) 并登录 Google 账号
-2. 使用浏览器扩展导出 Cookie
-3. 在 Twilight Echo 设置页中粘贴 Cookie 字符串
+2. 打开 Twilight Echo 侧边栏中的「YouTube Music 账号」页面
+3. 粘贴原始 Cookie，或粘贴浏览器开发者工具中复制的完整请求头
+4. 点击保存；内容必须包含 `SAPISID` 或 `__Secure-3PAPISID`
+
+保存后插件只持久化 `settings.cookie`，不会在页面或日志中回显 Cookie。保存 Cookie 会清理已缓存的 InnerTube 配置，之后音乐库会使用 `SAPISIDHASH` 认证访问。
+
+### 高级 OAuth client（可选）
+
+账号设置页也支持填写用户自备的 Google Cloud OAuth `client_id` 和 `client_secret`，用于替代自动发现的 YouTube TV OAuth client。该选项只影响 OAuth 登录/刷新流程，不默认解锁 YouTube Music 私人音乐库。
 
 > ⚠️ 需要 YouTube Premium 订阅才能播放部分受保护的内容。
 
@@ -92,6 +99,8 @@
 - 签名解码机制可能随 YouTube 播放器更新而失效
 - 部分地区可能需要代理访问 YouTube Music
 - Cookie 有效期有限，需要定期更新
+- OAuth 登录只用于账号资料识别；私人音乐库需要 Cookie/SAPISID
+- 高级 OAuth client 只替代 OAuth 登录凭据，不承诺可读取私人音乐库
 - 搜索结果仅返回可播放的歌曲和视频（不含专辑、艺术家等）
 
 ## 许可证
