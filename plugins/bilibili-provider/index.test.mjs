@@ -255,3 +255,17 @@ test('returns null for multi-page entry without valid cid', () => {
     null
   )
 })
+
+test('plugin.json declares library:read for library provider capability', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const manifestPath = path.join(import.meta.dirname, 'plugin.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
+
+  assert.equal(manifest.id, 'com.twilightecho.provider.bilibili')
+  assert.ok(manifest.type.includes('provider'))
+  assert.ok(manifest.permissions.includes('network'))
+  assert.ok(manifest.permissions.includes('settings'))
+  assert.ok(manifest.permissions.includes('ui:inject'))
+  assert.ok(manifest.permissions.includes('library:read'))
+})
