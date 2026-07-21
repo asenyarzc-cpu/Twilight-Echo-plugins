@@ -1,7 +1,7 @@
 {
   "id": "com.twilightecho.provider.ytmusic",
   "name": "YouTube Music 音源",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。基于 ytmusicapi 解析逻辑重构，支持搜索、播放、歌词、歌单和用户媒体库。",
   "author": "Px_asen",
   "license": "Apache-2.0",

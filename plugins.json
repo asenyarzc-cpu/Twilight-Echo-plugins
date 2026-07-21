@@ -37,7 +37,7 @@
     {
       "id": "com.twilightecho.provider.ytmusic",
       "name": "YouTube Music 音源",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。基于 ytmusicapi 解析逻辑重构，支持搜索、播放、歌词、歌单和用户媒体库。",
       "author": "Px_asen",
       "license": "Apache-2.0",
@@ -58,8 +58,8 @@
       ],
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "sourceUrl": "packages/com.twilightecho.provider.ytmusic-1.0.4.tep",
-      "checksumSha256": "4577c197cc1bcf092949fb973b73deb9a52547799745337e072a2ba422bcd35f",
+      "sourceUrl": "packages/com.twilightecho.provider.ytmusic-1.0.5.tep",
+      "checksumSha256": "eeef0584cfb5aad1bda7eabdd2e17422b383de456d93060e2e9d6d4970ff4ff2",
       "tags": [
         "provider",
         "ui",
