@@ -53,12 +53,22 @@ export async function generatePluginIndex(options = {}) {
     if (seenIds.has(manifest.id)) throw new Error(`插件索引存在重复插件 id：${manifest.id}`)
     seenIds.add(manifest.id)
     const buffer = await readFile(packagePath)
+    const repository =
+      options.repository ??
+      (typeof manifest.repository === 'string' && manifest.repository.trim()
+        ? manifest.repository.trim()
+        : DEFAULT_REPOSITORY)
+    const homepage =
+      options.homepage ??
+      (typeof manifest.homepage === 'string' && manifest.homepage.trim()
+        ? manifest.homepage.trim()
+        : repository)
     entries.push({
       ...manifest,
       sourceUrl: packageSourceUrl(packageName, options.baseUrl),
       checksumSha256: createHash('sha256').update(buffer).digest('hex'),
-      repository: options.repository ?? DEFAULT_REPOSITORY,
-      homepage: options.homepage ?? options.repository ?? DEFAULT_REPOSITORY,
+      repository,
+      homepage,
       tags: inferTags(manifest),
       verified: true
     })

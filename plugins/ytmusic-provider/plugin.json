@@ -11,5 +11,7 @@
     "twilightEcho": ">=0.20.0"
   },
   "apiVersion": 1,
-  "permissions": ["network", "settings", "ui:inject", "library:read"]
+  "permissions": ["network", "settings", "ui:inject", "library:read"],
+  "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+  "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins"
 }

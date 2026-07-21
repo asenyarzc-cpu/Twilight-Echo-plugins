@@ -268,4 +268,12 @@ test('plugin.json declares library:read for library provider capability', async 
   assert.ok(manifest.permissions.includes('settings'))
   assert.ok(manifest.permissions.includes('ui:inject'))
   assert.ok(manifest.permissions.includes('library:read'))
+  assert.equal(
+    manifest.repository,
+    'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins'
+  )
+  assert.equal(
+    manifest.homepage,
+    'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins'
+  )
 })
