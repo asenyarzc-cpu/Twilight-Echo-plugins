@@ -126,6 +126,7 @@ async function checkLogin() {
     const data = nav.data
     if (!data?.isLogin) {
       loginStateCache = null
+      logWarn('Bilibili session rejected by nav (isLogin=false); re-login required')
       return { loggedIn: false, profile: null }
     }
     const refreshed = await refreshCookieIfNeeded(auth)
@@ -317,52 +318,51 @@ async function searchSongs(keywords, limit = SEARCH_DEFAULT_LIMIT, offset = 0) {
 }
 
 async function getPlaybackUrl(track) {
+  const startedAt = Date.now()
   const { cookie } = await requireLoggedIn()
   const ids = parseBiliTrackId(track?.id || track?.filePath)
   if (!ids) throw new Error('Bilibili track id 无效')
   const keys = await getWbiKeys(cookie)
+  logInfo(`Bilibili getPlaybackUrl: ${ids.bvid}:${ids.cid}`)
 
   // Prefer DASH: a dedicated audio stream with backup CDN URLs. The
   // progressive endpoint (qn=16, fnval=0) only yields a 360p muxed A/V stream
   // and is regularly routed to unstable P2P edge nodes that stall the proxy.
+  let refreshedCid = null
   try {
-    const dashQuery = encodeWbiWithKeys(
-      {
-        bvid: ids.bvid,
-        cid: ids.cid,
-        fnval: 4048,
-        fnver: 0,
-        fourk: 1
-      },
-      keys
-    )
-    const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${dashQuery}`
-    const response = await biliJson(playUrl, { cookie }, PLAYURL_TIMEOUT_MS)
-    const audioSource = selectDashAudioSource(response.data)
-    if (audioSource) {
-      await ensureProxyServer()
-      const token = createProxyToken(
-        {
-          kind: 'stream',
-          urls: audioSource.urls,
-          cookie,
-          contentType: audioSource.contentType
-        },
-        STREAM_PROXY_TOKEN_TTL_MS
-      )
-      logInfo(
-        `Bilibili playback stream selected: ${audioSource.contentType} (${audioSource.codec || 'unknown'})`
-      )
-      return `http://127.0.0.1:${proxyPort}/stream/${token}`
-    }
+    const audioSource = await fetchDashAudioSource(ids, cookie, keys)
+    if (audioSource) return await createStreamUrl(audioSource, ids, cookie, startedAt)
   } catch (error) {
-    logWarn(`Bilibili DASH playback unavailable, trying progressive: ${errorToMessage(error)}`)
+    logWarn(`Bilibili DASH unavailable for ${ids.bvid}:${ids.cid}: ${errorToMessage(error)}`)
+    // A stale cid from a cached library listing yields playurl -404; re-resolve
+    // the cid from the live view API once before giving up.
+    refreshedCid = await refreshCidFromView(ids, cookie)
+    if (refreshedCid) {
+      try {
+        const audioSource = await fetchDashAudioSource(
+          { bvid: ids.bvid, cid: refreshedCid },
+          cookie,
+          keys
+        )
+        if (audioSource) {
+          return await createStreamUrl(audioSource, { bvid: ids.bvid, cid: refreshedCid }, cookie, startedAt)
+        }
+      } catch (retryError) {
+        logWarn(`Bilibili DASH retry with refreshed cid failed: ${errorToMessage(retryError)}`)
+        if (isTrackMissingError(retryError)) {
+          throw new Error(`Bilibili 视频已失效或不可播放：${ids.bvid}`)
+        }
+      }
+    } else if (isTrackMissingError(error)) {
+      throw new Error(`Bilibili 视频已失效或不可播放：${ids.bvid}`)
+    }
   }
 
+  const effectiveIds = refreshedCid ? { bvid: ids.bvid, cid: refreshedCid } : ids
   const progressiveQuery = encodeWbiWithKeys(
     {
-      bvid: ids.bvid,
-      cid: ids.cid,
+      bvid: effectiveIds.bvid,
+      cid: effectiveIds.cid,
       qn: 16,
       fnval: 0,
       fnver: 0,
@@ -374,10 +374,67 @@ async function getPlaybackUrl(track) {
   const progressiveUrl = `https://api.bilibili.com/x/player/wbi/playurl?${progressiveQuery}`
   const progressiveResponse = await biliJson(progressiveUrl, { cookie }, PLAYURL_TIMEOUT_MS)
   const progressiveMediaUrl = selectProgressivePlaybackUrl(progressiveResponse.data)
-  if (!progressiveMediaUrl) throw new Error('Bilibili 未返回可播放音频流')
+  if (!progressiveMediaUrl) throw new Error(`Bilibili 未返回可播放音频流：${ids.bvid}`)
   await ensureProxyServer()
-  const token = createProxyToken({ kind: 'stream', url: progressiveMediaUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
+  const token = createProxyToken(
+    { kind: 'stream', url: progressiveMediaUrl, cookie },
+    STREAM_PROXY_TOKEN_TTL_MS
+  )
+  logInfo(
+    `Bilibili progressive fallback selected for ${ids.bvid}:${effectiveIds.cid} in ${Date.now() - startedAt}ms`
+  )
   return `http://127.0.0.1:${proxyPort}/stream/${token}`
+}
+
+async function fetchDashAudioSource(ids, cookie, keys) {
+  const dashQuery = encodeWbiWithKeys(
+    {
+      bvid: ids.bvid,
+      cid: ids.cid,
+      fnval: 4048,
+      fnver: 0,
+      fourk: 1
+    },
+    keys
+  )
+  const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${dashQuery}`
+  const response = await biliJson(playUrl, { cookie }, PLAYURL_TIMEOUT_MS)
+  return selectDashAudioSource(response.data)
+}
+
+async function createStreamUrl(audioSource, ids, cookie, startedAt) {
+  await ensureProxyServer()
+  const token = createProxyToken(
+    {
+      kind: 'stream',
+      urls: audioSource.urls,
+      cookie,
+      contentType: audioSource.contentType
+    },
+    STREAM_PROXY_TOKEN_TTL_MS
+  )
+  logInfo(
+    `Bilibili playback stream selected: ${audioSource.contentType} (${audioSource.codec || 'unknown'}) for ${ids.bvid}:${ids.cid} in ${Date.now() - startedAt}ms`
+  )
+  return `http://127.0.0.1:${proxyPort}/stream/${token}`
+}
+
+async function refreshCidFromView(ids, cookie) {
+  try {
+    const view = await getVideoView(ids.bvid, cookie)
+    const pages = Array.isArray(view?.pages) ? view.pages : []
+    const cid = Number(pages[0]?.cid ?? view?.cid)
+    if (Number.isFinite(cid) && cid > 0 && cid !== Number(ids.cid)) return cid
+    return null
+  } catch (error) {
+    logWarn(`Bilibili cid refresh failed for ${ids.bvid}: ${errorToMessage(error)}`)
+    return null
+  }
+}
+
+export function isTrackMissingError(error) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  return /啥都木有|-404|62002|62004|62012/.test(message)
 }
 
 async function mapMediaToTracks(media, albumName, cookie) {

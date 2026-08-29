@@ -7,6 +7,7 @@ import {
   extractMediaCid,
   fetchStreamCandidate,
   isCacheEntryFresh,
+  isTrackMissingError,
   mapBiliMediaToTrack,
   mapPageToTrack,
   mergeRefreshedCookies,
@@ -271,6 +272,14 @@ function stubFetch(handler) {
     globalThis.fetch = originalFetch
   }
 }
+
+test('recognizes track-missing playurl errors for stale cids', () => {
+  assert.equal(isTrackMissingError(new Error('Bilibili API 错误：啥都木有')), true)
+  assert.equal(isTrackMissingError(new Error('Bilibili API 错误：-404')), true)
+  assert.equal(isTrackMissingError(new Error('Bilibili API 错误：62002')), true)
+  assert.equal(isTrackMissingError(new Error('Bilibili 请求超时，请稍后重试')), false)
+  assert.equal(isTrackMissingError(new Error('Bilibili API 错误：-352')), false)
+})
 
 test('falls through to backup CDN when the first candidate stalls', async () => {
   let calls = 0
