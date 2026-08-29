@@ -4,8 +4,16 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { test } from 'node:test'
-import { createZip } from '../../Twilight_Echo-main/packages/create-twilight-plugin/lib/zip.cjs'
+import { pathToFileURL } from 'node:url'
 import { generatePluginIndex } from './generate-index.mjs'
+
+// The host repo checkout name varies per machine; TWILIGHT_ECHO_ROOT matches
+// the override used by scripts/pack-plugin.cjs.
+const twilightRoot =
+  process.env.TWILIGHT_ECHO_ROOT || resolve(import.meta.dirname, '..', '..', 'Twilight_Echo-main')
+const { createZip } = await import(
+  pathToFileURL(join(twilightRoot, 'packages', 'create-twilight-plugin', 'lib', 'zip.cjs')).href
+)
 
 const manifest = {
   id: 'com.example.generated',

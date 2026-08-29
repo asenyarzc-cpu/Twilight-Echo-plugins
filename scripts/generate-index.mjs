@@ -93,7 +93,13 @@ export async function generatePluginIndex(options = {}) {
 }
 
 async function readPackageManifest(packagePath) {
-  const { stdout } = await execFileAsync('tar', ['-xOf', packagePath, 'plugin.json'], {
+  // tep files are zip archives. On Windows the Git Bash GNU tar cannot read
+  // zip and chokes on `D:` drive letters, so prefer the bundled bsdtar.
+  const tarExecutable =
+    process.platform === 'win32' && existsSync('C:\\Windows\\System32\\tar.exe')
+      ? 'C:\\Windows\\System32\\tar.exe'
+      : 'tar'
+  const { stdout } = await execFileAsync(tarExecutable, ['-xOf', packagePath, 'plugin.json'], {
     maxBuffer: 1024 * 1024
   })
   return JSON.parse(stdout)
