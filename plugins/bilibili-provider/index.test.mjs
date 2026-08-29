@@ -5,6 +5,7 @@ import {
   encodeWbiWithKeys,
   extractCookieValue,
   extractMediaCid,
+  fetchStreamCandidate,
   isCacheEntryFresh,
   mapBiliMediaToTrack,
   mapPageToTrack,
@@ -254,6 +255,92 @@ test('returns null for multi-page entry without valid cid', () => {
     ),
     null
   )
+})
+
+// Minimal fetch stub that honours AbortSignal like undici does.
+function stubFetch(handler) {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (url, init = {}) =>
+    new Promise((resolve, reject) => {
+      const onAbort = () => reject(new Error('AbortError'))
+      if (init.signal?.aborted) return onAbort()
+      init.signal?.addEventListener('abort', onAbort, { once: true })
+      handler(url, resolve, reject)
+    })
+  return () => {
+    globalThis.fetch = originalFetch
+  }
+}
+
+test('falls through to backup CDN when the first candidate stalls', async () => {
+  let calls = 0
+  const restore = stubFetch((url, resolve) => {
+    calls += 1
+    if (String(url).includes('stalled.example')) return
+    resolve(new Response('audio', { status: 206, headers: { 'content-type': 'audio/mp4' } }))
+  })
+  try {
+    const upstream = await fetchStreamCandidate(
+      { urls: ['https://stalled.example/a.m4s', 'https://backup.example/a.m4s'] },
+      {},
+      undefined,
+      30
+    )
+    assert.equal(upstream.status, 206)
+    assert.equal(calls, 2)
+  } finally {
+    restore()
+  }
+})
+
+test('stops trying candidates when the client aborts the request', async () => {
+  let calls = 0
+  const restore = stubFetch((_url, _resolve, reject) => {
+    calls += 1
+    return new Promise(() => {})
+  })
+  try {
+    const controller = new AbortController()
+    const pending = fetchStreamCandidate(
+      { urls: ['https://a.example/a.m4s', 'https://b.example/a.m4s'] },
+      {},
+      controller.signal,
+      30000
+    )
+    setTimeout(() => controller.abort(), 20)
+    assert.equal(await pending, null)
+    assert.equal(calls, 1)
+  } finally {
+    restore()
+  }
+})
+
+test('does not abort an in-flight stream body after headers arrive', async () => {
+  let bodyAborted = false
+  const restore = stubFetch((_url, resolve) => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('chunk-1'))
+        setTimeout(() => {
+          controller.enqueue(new TextEncoder().encode('chunk-2'))
+          controller.close()
+        }, 120)
+      },
+      cancel() {
+        bodyAborted = true
+      }
+    })
+    resolve(new Response(body, { status: 200, headers: { 'content-type': 'audio/mp4' } }))
+  })
+  try {
+    const upstream = await fetchStreamCandidate({ urls: ['https://ok.example/a.m4s'] }, {}, undefined, 30)
+    assert.ok(upstream)
+    const text = await upstream.text()
+    assert.equal(text, 'chunk-1chunk-2')
+    assert.equal(bodyAborted, false)
+  } finally {
+    restore()
+  }
 })
 
 test('plugin.json declares library:read for library provider capability', async () => {

@@ -18,6 +18,8 @@ Twilight Echo provider plugin:
   `passport.bilibili.com/x/passport-login/web/cookie/refresh` 静默续期，无需重新扫码
 - **收藏夹缓存 TTL** — 收藏夹曲目缓存 10 分钟后自动失效，B 站 App 新收藏的内容能被及时看到
 - 仅音频播放 — 通过本地 `127.0.0.1` 代理转发 DASH 音频流，不下载或展示视频画面
+- **DASH 高音质优先** — 播放地址优先走 DASH 音频轨（会员 Hi-Res FLAC 参与择优），渐进式流（`platform=html5`）仅作兜底
+- **代理可靠性** — 上游 CDN 请求带响应头超时（15s），挂起的 P2P 边缘节点自动切换 `backupUrl`；客户端断开（seek/切歌）会取消上游拉流；stream 令牌有效期 6 小时，覆盖暂停后 seek
 - 封面与头像 — 经同一本地代理注入 B 站 CDN 所需的 Referer / User-Agent 头
 - 私有 Cookie 存储 — 仅写入插件私有 settings 文件
 

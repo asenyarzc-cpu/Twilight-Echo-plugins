@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from 'crypto'
 import { createServer } from 'http'
+import { pipeline } from 'stream/promises'
+import { Readable } from 'stream'
 
 const PROVIDER_ID = 'bili'
 const SETTINGS_AUTH_KEY = 'auth'
@@ -10,9 +12,15 @@ const BILI_REFERER = 'https://www.bilibili.com/'
 const BILI_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 const QR_EXPIRES_SECONDS = 180
-const STREAM_PROXY_TOKEN_TTL_MS = 8 * 60 * 1000
+// Stream tokens must outlive the whole playback session: the native engine
+// re-opens the same proxy URL for seeks long after getPlaybackUrl returned.
+const STREAM_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
 const IMAGE_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
 const BILI_REQUEST_TIMEOUT_MS = 15000
+// Time to receive upstream response headers before moving to the next CDN
+// candidate. Bilibili regularly routes playurl responses to P2P edge nodes
+// that accept the connection and then never answer.
+const STREAM_CANDIDATE_TIMEOUT_MS = 15000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
 const VIDEO_VIEW_CONCURRENCY = 6
@@ -32,6 +40,7 @@ const WBI_MIXIN_KEY_ENC_TAB = [
 
 let pluginContext = null
 let proxyServer = null
+let proxyServerStart = null
 let proxyPort = 0
 const proxyTokens = new Map()
 const favoriteTrackCache = new Map()
@@ -82,6 +91,7 @@ export async function deactivate() {
     proxyServer = null
     proxyPort = 0
   }
+  proxyServerStart = null
   pluginContext = null
 }
 
@@ -277,6 +287,44 @@ async function getPlaybackUrl(track) {
   const ids = parseBiliTrackId(track?.id || track?.filePath)
   if (!ids) throw new Error('Bilibili track id 无效')
   const keys = await getWbiKeys(cookie)
+
+  // Prefer DASH: a dedicated audio stream with backup CDN URLs. The
+  // progressive endpoint (qn=16, fnval=0) only yields a 360p muxed A/V stream
+  // and is regularly routed to unstable P2P edge nodes that stall the proxy.
+  try {
+    const dashQuery = encodeWbiWithKeys(
+      {
+        bvid: ids.bvid,
+        cid: ids.cid,
+        fnval: 4048,
+        fnver: 0,
+        fourk: 1
+      },
+      keys
+    )
+    const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${dashQuery}`
+    const response = await biliJson(playUrl, { cookie })
+    const audioSource = selectDashAudioSource(response.data)
+    if (audioSource) {
+      await ensureProxyServer()
+      const token = createProxyToken(
+        {
+          kind: 'stream',
+          urls: audioSource.urls,
+          cookie,
+          contentType: audioSource.contentType
+        },
+        STREAM_PROXY_TOKEN_TTL_MS
+      )
+      logInfo(
+        `Bilibili playback stream selected: ${audioSource.contentType} (${audioSource.codec || 'unknown'})`
+      )
+      return `http://127.0.0.1:${proxyPort}/stream/${token}`
+    }
+  } catch (error) {
+    logWarn(`Bilibili DASH playback unavailable, trying progressive: ${errorToMessage(error)}`)
+  }
+
   const progressiveQuery = encodeWbiWithKeys(
     {
       bvid: ids.bvid,
@@ -284,46 +332,17 @@ async function getPlaybackUrl(track) {
       qn: 16,
       fnval: 0,
       fnver: 0,
-      fourk: 0
+      fourk: 0,
+      platform: 'html5'
     },
     keys
   )
   const progressiveUrl = `https://api.bilibili.com/x/player/wbi/playurl?${progressiveQuery}`
   const progressiveResponse = await biliJson(progressiveUrl, { cookie })
   const progressiveMediaUrl = selectProgressivePlaybackUrl(progressiveResponse.data)
-  if (progressiveMediaUrl) {
-    await ensureProxyServer()
-    const token = createProxyToken({ kind: 'stream', url: progressiveMediaUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
-    return `http://127.0.0.1:${proxyPort}/stream/${token}`
-  }
-
-  const query = encodeWbiWithKeys(
-    {
-      bvid: ids.bvid,
-      cid: ids.cid,
-      fnval: 4048,
-      fnver: 0,
-      fourk: 1
-    },
-    keys
-  )
-  const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${query}`
-  const response = await biliJson(playUrl, { cookie })
-  const audioSource = selectDashAudioSource(response.data)
-  if (!audioSource) throw new Error('Bilibili 未返回可播放音频流')
+  if (!progressiveMediaUrl) throw new Error('Bilibili 未返回可播放音频流')
   await ensureProxyServer()
-  const token = createProxyToken(
-    {
-      kind: 'stream',
-      urls: audioSource.urls,
-      cookie,
-      contentType: audioSource.contentType
-    },
-    STREAM_PROXY_TOKEN_TTL_MS
-  )
-  logInfo(
-    `Bilibili playback stream selected: ${audioSource.contentType} (${audioSource.codec || 'unknown'})`
-  )
+  const token = createProxyToken({ kind: 'stream', url: progressiveMediaUrl, cookie }, STREAM_PROXY_TOKEN_TTL_MS)
   return `http://127.0.0.1:${proxyPort}/stream/${token}`
 }
 
@@ -576,21 +595,39 @@ async function readAuth() {
 
 async function ensureProxyServer() {
   if (proxyServer && proxyPort > 0) return
-  proxyServer = createServer((request, response) => {
+  // Concurrent getPlaybackUrl calls must not race two servers into existence.
+  if (!proxyServerStart) {
+    proxyServerStart = startProxyServer().finally(() => {
+      proxyServerStart = null
+    })
+  }
+  await proxyServerStart
+}
+
+async function startProxyServer() {
+  const server = createServer((request, response) => {
     void handleProxyRequest(request, response)
   })
   await new Promise((resolve, reject) => {
-    proxyServer.once('error', reject)
-    proxyServer.listen(0, '127.0.0.1', () => {
-      const address = proxyServer.address()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
       proxyPort = typeof address === 'object' && address ? address.port : 0
-      proxyServer.off('error', reject)
+      server.off('error', reject)
       resolve()
     })
   })
+  proxyServer = server
 }
 
 async function handleProxyRequest(request, response) {
+  // Players abort connections constantly (FFmpeg seeks, track switches). Tie
+  // the upstream fetch to the client socket so aborted requests stop pulling
+  // from the CDN instead of leaking zombie streams.
+  const upstreamAbort = new AbortController()
+  const abortUpstream = () => upstreamAbort.abort()
+  request.on('error', abortUpstream)
+  response.on('close', abortUpstream)
   try {
     response.setHeader('Access-Control-Allow-Origin', '*')
     if (request.method === 'OPTIONS') {
@@ -613,7 +650,10 @@ async function handleProxyRequest(request, response) {
     if (entry.cookie) upstreamHeaders.Cookie = entry.cookie
     const range = request.headers.range
     if (kind === 'stream' && typeof range === 'string') upstreamHeaders.Range = range
-    const upstream = kind === 'stream' ? await fetchStreamCandidate(entry, upstreamHeaders) : await fetch(entry.url, { headers: upstreamHeaders })
+    const upstream =
+      kind === 'stream'
+        ? await fetchStreamCandidate(entry, upstreamHeaders, upstreamAbort.signal)
+        : await fetch(entry.url, { headers: upstreamHeaders, signal: upstreamAbort.signal })
     if (!upstream) {
       response.statusCode = 502
       response.end('Bilibili proxy failed: no playable upstream stream')
@@ -638,11 +678,15 @@ async function handleProxyRequest(request, response) {
       response.end()
       return
     }
-    for await (const chunk of upstream.body) {
-      response.write(chunk)
-    }
-    response.end()
+    // pipeline applies backpressure and forwards stream errors; a bare
+    // for-await write loop would buffer the whole song in memory once the
+    // client stops reading.
+    await pipeline(Readable.fromWeb(upstream.body), response)
   } catch (error) {
+    if (response.headersSent) {
+      response.destroy()
+      return
+    }
     response.statusCode = 502
     response.end(`Bilibili proxy failed: ${errorToMessage(error)}`)
   }
@@ -675,18 +719,29 @@ async function createImageProxyUrl(url, cookie) {
   return `http://127.0.0.1:${proxyPort}/image/${token}`
 }
 
-async function fetchStreamCandidate(entry, upstreamHeaders) {
+export async function fetchStreamCandidate(entry, upstreamHeaders, signal, timeoutMs = STREAM_CANDIDATE_TIMEOUT_MS) {
   const urls = Array.isArray(entry.urls) ? entry.urls : entry.url ? [entry.url] : []
   let lastError = null
   for (const url of urls) {
+    // The timeout only guards header arrival: once a CDN answers we must not
+    // cut off the body mid-song. A dead edge node then falls through to the
+    // next backup URL instead of stalling the player forever.
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const onClientAbort = () => controller.abort()
+    signal?.addEventListener('abort', onClientAbort)
     try {
-      const upstream = await fetch(url, { headers: upstreamHeaders })
+      const upstream = await fetch(url, { headers: upstreamHeaders, signal: controller.signal })
       if (upstream.ok) return upstream
       lastError = new Error(`HTTP ${upstream.status}`)
       logWarn(`Bilibili stream candidate failed: ${upstream.status}`)
     } catch (error) {
+      if (signal?.aborted) return null
       lastError = error
       logWarn(`Bilibili stream candidate failed: ${errorToMessage(error)}`)
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onClientAbort)
     }
   }
   if (lastError) logWarn(`Bilibili stream exhausted: ${errorToMessage(lastError)}`)
@@ -935,7 +990,23 @@ export function selectDashAudioUrl(data) {
 
 export function selectDashAudioSource(data) {
   const audio = Array.isArray(data?.dash?.audio) ? data.dash.audio : []
-  const candidates = audio
+  // Hi-Res members get their FLAC stream in a separate dash.flac.audio field;
+  // it must compete in the same ranking or it would never be selected.
+  const flac = data?.dash?.flac?.audio
+  const flacEntry = flac
+    ? {
+        ...flac,
+        codecs: typeof flac.codecs === 'string' && flac.codecs ? flac.codecs : 'fLaC',
+        mimeType:
+          typeof flac.mimeType === 'string' && flac.mimeType
+            ? flac.mimeType
+            : typeof flac.mime_type === 'string' && flac.mime_type
+              ? flac.mime_type
+              : 'audio/flac'
+      }
+    : null
+  const candidates = [...audio, flacEntry]
+    .filter(Boolean)
     .map((item) => {
       const url = item?.baseUrl || item?.base_url
       if (typeof url !== 'string' || !url) return null
@@ -965,21 +1036,6 @@ export function selectDashAudioSource(data) {
   })
   const selected = candidates[0] ?? null
   if (!selected) {
-    const flac = data?.dash?.flac?.audio
-    const flacUrl = flac?.baseUrl || flac?.base_url
-    if (typeof flacUrl === 'string' && flacUrl) {
-      return {
-        url: flacUrl,
-        urls: [flacUrl],
-        bandwidth: Number(flac?.bandwidth) || 0,
-        codec: typeof flac?.codecs === 'string' ? flac.codecs : 'fLaC',
-        mimeType: typeof flac?.mimeType === 'string' ? flac.mimeType : typeof flac?.mime_type === 'string' ? flac.mime_type : 'audio/flac',
-        contentType: normalizeAudioContentType(
-          typeof flac?.mimeType === 'string' ? flac.mimeType : typeof flac?.mime_type === 'string' ? flac.mime_type : 'audio/flac',
-          typeof flac?.codecs === 'string' ? flac.codecs : 'fLaC'
-        )
-      }
-    }
     return null
   }
   return {
@@ -990,9 +1046,9 @@ export function selectDashAudioSource(data) {
 
 function getAudioCodecScore(codec) {
   const value = String(codec || '').toLowerCase()
-  if (value.includes('mp4a') || value.includes('aac')) return 0
-  if (value.includes('opus')) return 1
-  if (value.includes('flac')) return 2
+  if (value.includes('flac')) return 0
+  if (value.includes('mp4a') || value.includes('aac')) return 1
+  if (value.includes('opus')) return 2
   return 3
 }
 
