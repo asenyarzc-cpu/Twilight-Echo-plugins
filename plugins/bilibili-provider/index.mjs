@@ -16,11 +16,18 @@ const QR_EXPIRES_SECONDS = 180
 // re-opens the same proxy URL for seeks long after getPlaybackUrl returned.
 const STREAM_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
 const IMAGE_PROXY_TOKEN_TTL_MS = 6 * 60 * 60 * 1000
-const BILI_REQUEST_TIMEOUT_MS = 15000
+// Keep the worst-case getPlaybackUrl chain (nav + refresh probe + two playurl
+// calls) below the host's 30s provider RPC timeout.
+const BILI_REQUEST_TIMEOUT_MS = 10000
+const PLAYURL_TIMEOUT_MS = 8000
+const COOKIE_REFRESH_TIMEOUT_MS = 5000
 // Time to receive upstream response headers before moving to the next CDN
 // candidate. Bilibili regularly routes playurl responses to P2P edge nodes
 // that accept the connection and then never answer.
 const STREAM_CANDIDATE_TIMEOUT_MS = 15000
+const LOGIN_CHECK_CACHE_TTL_MS = 60 * 1000
+const WBI_KEYS_CACHE_TTL_MS = 10 * 60 * 1000
+const DEVICE_COOKIE_TIMEOUT_MS = 3000
 const MAX_FAVORITE_PAGES = 50
 const PAGE_SIZE = 20
 const VIDEO_VIEW_CONCURRENCY = 6
@@ -29,7 +36,6 @@ const FAVORITE_CACHE_TTL_MS = 10 * 60 * 1000
 const SEARCH_DEFAULT_LIMIT = 30
 const SEARCH_PAGE_SIZE = 20
 const SEARCH_VIEW_CONCURRENCY = 6
-const COOKIE_REFRESH_TIMEOUT_MS = 10000
 const COOKIE_REFRESH_CHECK_INTERVAL_MS = 5 * 60 * 1000
 const WBI_MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
@@ -45,6 +51,11 @@ let proxyPort = 0
 const proxyTokens = new Map()
 const favoriteTrackCache = new Map()
 let cookieRefreshCheckedAt = 0
+// Login state and WBI keys are cached so the getPlaybackUrl hot path does not
+// spend two nav round-trips per track switch; a slow nav chain used to push
+// the call past the host RPC timeout and open the plugin circuit breaker.
+let loginStateCache = null
+let wbiKeysCache = null
 
 export async function activate(context) {
   pluginContext = context
@@ -86,6 +97,8 @@ export async function deactivate() {
   proxyTokens.clear()
   favoriteTrackCache.clear()
   cookieRefreshCheckedAt = 0
+  loginStateCache = null
+  wbiKeysCache = null
   if (proxyServer) {
     await new Promise((resolve) => proxyServer.close(resolve))
     proxyServer = null
@@ -97,14 +110,30 @@ export async function deactivate() {
 
 async function checkLogin() {
   const auth = await readAuth()
-  if (!auth?.cookie) return { loggedIn: false, profile: null }
+  if (!auth?.cookie) {
+    loginStateCache = null
+    return { loggedIn: false, profile: null }
+  }
+  if (
+    loginStateCache &&
+    loginStateCache.cookie === auth.cookie &&
+    Date.now() < loginStateCache.expiresAt
+  ) {
+    return { loggedIn: true, profile: loginStateCache.profile }
+  }
   try {
     const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie: auth.cookie })
     const data = nav.data
-    if (!data?.isLogin) return { loggedIn: false, profile: null }
+    if (!data?.isLogin) {
+      loginStateCache = null
+      return { loggedIn: false, profile: null }
+    }
     const refreshed = await refreshCookieIfNeeded(auth)
     const cookie = refreshed?.cookie || auth.cookie
-    return { loggedIn: true, profile: await mapProfile(data, cookie) }
+    cacheWbiKeysFromNav(data)
+    const profile = await mapProfile(data, cookie)
+    loginStateCache = { cookie, profile, expiresAt: Date.now() + LOGIN_CHECK_CACHE_TTL_MS }
+    return { loggedIn: true, profile }
   } catch (error) {
     logWarn(`Bilibili login check failed: ${errorToMessage(error)}`)
     return { loggedIn: false, profile: null }
@@ -123,6 +152,8 @@ async function logout() {
   proxyTokens.clear()
   favoriteTrackCache.clear()
   cookieRefreshCheckedAt = 0
+  loginStateCache = null
+  wbiKeysCache = null
 }
 
 async function getQrLogin() {
@@ -149,12 +180,15 @@ async function checkQrLogin(key) {
     const cookies = parseSetCookies(getSetCookieHeaders(response.headers))
     const cookie = mergeCookieString(cookies)
     if (!cookie.includes('SESSDATA=')) throw new Error('Bilibili 登录成功但没有返回 SESSDATA')
+    const refreshToken = typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : ''
     await requireContext().settings.set(SETTINGS_AUTH_KEY, {
       cookie,
-      refreshToken: typeof json?.data?.refresh_token === 'string' ? json.data.refresh_token : '',
+      refreshToken,
       updatedAt: new Date().toISOString()
     })
     cookieRefreshCheckedAt = 0
+    loginStateCache = null
+    await ensureDeviceCookie({ cookie, refreshToken })
     logInfo('Bilibili login succeeded')
   }
   return { code, message: typeof json?.data?.message === 'string' ? json.data.message : '' }
@@ -303,7 +337,7 @@ async function getPlaybackUrl(track) {
       keys
     )
     const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${dashQuery}`
-    const response = await biliJson(playUrl, { cookie })
+    const response = await biliJson(playUrl, { cookie }, PLAYURL_TIMEOUT_MS)
     const audioSource = selectDashAudioSource(response.data)
     if (audioSource) {
       await ensureProxyServer()
@@ -338,7 +372,7 @@ async function getPlaybackUrl(track) {
     keys
   )
   const progressiveUrl = `https://api.bilibili.com/x/player/wbi/playurl?${progressiveQuery}`
-  const progressiveResponse = await biliJson(progressiveUrl, { cookie })
+  const progressiveResponse = await biliJson(progressiveUrl, { cookie }, PLAYURL_TIMEOUT_MS)
   const progressiveMediaUrl = selectProgressivePlaybackUrl(progressiveResponse.data)
   if (!progressiveMediaUrl) throw new Error('Bilibili 未返回可播放音频流')
   await ensureProxyServer()
@@ -441,8 +475,20 @@ async function getVideoView(bvid, cookie) {
 }
 
 async function getWbiKeys(cookie) {
+  if (wbiKeysCache && Date.now() < wbiKeysCache.expiresAt) return wbiKeysCache.keys
   const nav = await biliJson('https://api.bilibili.com/x/web-interface/nav', { cookie })
-  return extractWbiKeys(nav.data?.wbi_img)
+  cacheWbiKeysFromNav(nav.data)
+  if (!wbiKeysCache) throw new Error('Bilibili WBI key 不可用')
+  return wbiKeysCache.keys
+}
+
+function cacheWbiKeysFromNav(data) {
+  try {
+    const keys = extractWbiKeys(data?.wbi_img)
+    wbiKeysCache = { keys, expiresAt: Date.now() + WBI_KEYS_CACHE_TTL_MS }
+  } catch {
+    // A nav payload without wbi_img leaves any previous key cache untouched.
+  }
 }
 
 export function extractMediaCid(media) {
@@ -450,10 +496,12 @@ export function extractMediaCid(media) {
   return Number.isFinite(cid) && cid > 0 ? cid : null
 }
 
-async function biliJson(input, options = {}) {
-  const response = await fetchWithTimeout(input, {
-    headers: defaultHeaders(options.cookie)
-  })
+async function biliJson(input, options = {}, timeoutMs = BILI_REQUEST_TIMEOUT_MS) {
+  const response = await fetchWithTimeout(
+    input,
+    { headers: defaultHeaders(options.cookie) },
+    timeoutMs
+  )
   if (!response.ok) {
     throw new Error(`Bilibili 请求失败：HTTP ${response.status}`)
   }
@@ -576,10 +624,39 @@ function defaultHeaders(cookie) {
 async function requireLoggedIn() {
   const auth = await readAuth()
   if (!auth?.cookie) throw new Error('请先登录 Bilibili')
+  const cookie = await ensureDeviceCookie(auth)
   const login = await checkLogin()
   if (!login.loggedIn || !login.profile) throw new Error('Bilibili 登录已失效，请重新登录')
   const refreshedAuth = await readAuth()
-  return { cookie: refreshedAuth?.cookie || auth.cookie, profile: login.profile }
+  return { cookie: refreshedAuth?.cookie || cookie, profile: login.profile }
+}
+
+/**
+ * Attach the anonymous device cookie (buvid3/buvid4) that the bilibili web
+ * client always sends. Logged-in API calls without it are subject to slower
+ * risk-controlled handling and degraded playurl responses.
+ */
+async function ensureDeviceCookie(auth) {
+  if (extractCookieValue(auth.cookie, 'buvid3')) return auth.cookie
+  try {
+    const spi = await biliJson('https://api.bilibili.com/x/frontend/finger/spi', {}, DEVICE_COOKIE_TIMEOUT_MS)
+    const buvid3 = String(spi.data?.b_3 || '')
+    if (!buvid3) return auth.cookie
+    const merged = mergeRefreshedCookies(auth.cookie, {
+      buvid3,
+      buvid4: String(spi.data?.b_4 || '')
+    })
+    await requireContext().settings.set(SETTINGS_AUTH_KEY, {
+      cookie: merged,
+      refreshToken: auth.refreshToken,
+      updatedAt: new Date().toISOString()
+    })
+    logInfo('Bilibili device cookie (buvid3) attached')
+    return merged
+  } catch (error) {
+    logWarn(`Bilibili device cookie fetch skipped: ${errorToMessage(error)}`)
+    return auth.cookie
+  }
 }
 
 async function readAuth() {

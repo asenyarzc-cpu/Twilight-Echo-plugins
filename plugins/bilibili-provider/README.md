@@ -16,6 +16,8 @@ Twilight Echo provider plugin:
 - **置顶收藏夹** — 可固定一个或多个收藏夹置顶显示
 - **Cookie 静默刷新** — 利用登录返回的 `refresh_token`，在 SESSDATA 即将轮换时通过
   `passport.bilibili.com/x/passport-login/web/cookie/refresh` 静默续期，无需重新扫码
+- **设备 Cookie 补全** — 登录后自动附加 `buvid3`/`buvid4`（`finger/spi`），与 B 站 Web 端请求姿态一致，降低风控慢响应概率
+- **播放热路径缓存** — 登录态（60s）与 WBI 签名密钥（10min）缓存复用，切歌时不再重复请求 `nav`，整条 `getPlaybackUrl` 链路远低于宿主 30s RPC 超时
 - **收藏夹缓存 TTL** — 收藏夹曲目缓存 10 分钟后自动失效，B 站 App 新收藏的内容能被及时看到
 - 仅音频播放 — 通过本地 `127.0.0.1` 代理转发 DASH 音频流，不下载或展示视频画面
 - **DASH 高音质优先** — 播放地址优先走 DASH 音频轨（会员 Hi-Res FLAC 参与择优），渐进式流（`platform=html5`）仅作兜底
