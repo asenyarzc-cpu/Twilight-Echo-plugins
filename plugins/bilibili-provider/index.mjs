@@ -77,11 +77,53 @@ export async function activate(context) {
     getProfile,
     logout,
     getQrLogin,
+    getQrKey: () => getQrLogin().then((login) => login.key),
+    getQrImage: async () => null,
     checkQrLogin,
     fetchUserLibrary,
     fetchPlaylistTracks,
     searchSongs,
-    getPlaybackUrl
+    getPlaybackUrl,
+    // The renderer exposes every method matching this plugin's declared
+    // capabilities, and the host circuit breaker counts an unimplemented RPC
+    // as a plugin failure. Read-only capability probes must therefore resolve
+    // harmlessly instead of erroring.
+    searchArtists: async () => ({ items: [], total: 0 }),
+    searchPlaylists: async () => ({ items: [], total: 0 }),
+    fetchLikedTracks: async () => [],
+    fetchRecommendSongs: async () => [],
+    fetchRecommendPlaylists: async () => [],
+    fetchPersonalFm: async () => [],
+    fetchPrivateContent: async () => [],
+    fetchArtistTopSongs: async () => [],
+    fetchArtistAlbums: async () => [],
+    fetchArtistIntro: async () => '',
+    fetchArtistFollowState: async () => null,
+    fetchAlbumTracks: async () => [],
+    fetchArtistPlaylists: async () => [],
+    fetchUserPlaylistsByUid: async () => [],
+    fetchUserFollows: async () => [],
+    fetchUserFolloweds: async () => [],
+    fetchPlayRecords: async () => [],
+    fetchRecentSongs: async () => [],
+    followArtist: async () => undefined,
+    followUser: async () => undefined,
+    likeTrack: async () => undefined,
+    isTrackLiked: async () => false,
+    // Playlist editing has no Bilibili counterpart; fail these explicit user
+    // actions with a clear message rather than pretending they succeeded.
+    createPlaylist: async () => {
+      throw new Error('Bilibili 音源不支持创建歌单')
+    },
+    deletePlaylist: async () => {
+      throw new Error('Bilibili 音源不支持删除歌单')
+    },
+    addTracksToPlaylist: async () => {
+      throw new Error('Bilibili 音源不支持添加到歌单')
+    },
+    removeTracksFromPlaylist: async () => {
+      throw new Error('Bilibili 音源不支持从歌单移除')
+    }
   })
   await context.twilight.ui.register({
     id: 'bilibili-account',

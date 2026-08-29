@@ -4,7 +4,7 @@
     {
       "id": "com.twilightecho.provider.bilibili",
       "name": "Bilibili 收藏夹音源",
-      "version": "0.1.12",
+      "version": "0.1.13",
       "description": "在流媒体页的 Bilibili 入口中搜索视频并播放收藏夹音频。支持搜索、多 P 展开、Cookie 静默刷新与 DASH 高音质播放。",
       "author": "Px_asen",
       "license": "Apache-2.0",
@@ -25,8 +25,8 @@
       ],
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.12.tep",
-      "checksumSha256": "8e831fda2af6dc130dc452bc9408797dfebd50543c17789b2d8c0d7990134388",
+      "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.13.tep",
+      "checksumSha256": "565fe7cb4cd9a06de39d79f40ba53c799ae64ef157501364da66bcfae7c8436d",
       "tags": [
         "provider",
         "ui",

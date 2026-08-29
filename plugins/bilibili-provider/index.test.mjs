@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { activate } from './index.mjs'
 import {
   encodeWbiWithKeys,
   extractCookieValue,
@@ -272,6 +273,37 @@ function stubFetch(handler) {
     globalThis.fetch = originalFetch
   }
 }
+
+test('registers safe stubs for every capability-exposed provider method', async () => {
+  let registered = null
+  const context = {
+    logger: { info: () => undefined, warn: () => undefined },
+    settings: { get: async () => undefined, set: async () => undefined, delete: async () => undefined },
+    twilight: {
+      providers: { register: async (provider) => (registered = provider) },
+      ui: { register: async () => undefined, onCommand: () => undefined }
+    }
+  }
+
+  await activate(context)
+  assert.ok(registered)
+
+  // The renderer probes these on every track switch; an unimplemented RPC is
+  // counted as a plugin failure by the host circuit breaker.
+  assert.equal(await registered.isTrackLiked('bili:x:1'), false)
+  assert.equal(await registered.likeTrack('bili:x:1', true), undefined)
+  assert.equal(await registered.followArtist('up-1', true), undefined)
+  assert.equal(await registered.followUser('user-1', false), undefined)
+  assert.equal(await registered.getQrImage('key'), null)
+
+  assert.deepEqual(await registered.searchArtists('kw'), { items: [], total: 0 })
+  assert.deepEqual(await registered.searchPlaylists('kw'), { items: [], total: 0 })
+  assert.deepEqual(await registered.fetchLikedTracks(), [])
+  assert.deepEqual(await registered.fetchAlbumTracks('album'), [])
+
+  await assert.rejects(() => registered.createPlaylist('name'), /不支持创建歌单/)
+  await assert.rejects(() => registered.addTracksToPlaylist('pl', ['a']), /不支持添加到歌单/)
+})
 
 test('recognizes track-missing playurl errors for stale cids', () => {
   assert.equal(isTrackMissingError(new Error('Bilibili API 错误：啥都木有')), true)
