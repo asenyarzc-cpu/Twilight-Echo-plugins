@@ -1640,7 +1640,7 @@ async function getLyrics(track, requestContext) {
                 trans_t: 0,
                 roma_t: 0,
                 qrc_t: 0,
-                crypt: 1,
+                crypt: 2,
                 lrc_t: 0,
                 interval: 0
               }

@@ -1018,15 +1018,20 @@ test('loads user playlists and song details with private QQ session headers', as
   )
 })
 
-test('falls back from legacy lyric endpoint to Musicu and decodes LRC', async () => {
+test('falls back from legacy lyric endpoint and requests plaintext LRC from Musicu', async () => {
   const harness = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
   let calls = 0
-  const encoded = Buffer.from('[00:01.00]歌词').toString('base64')
   await withFetch(
-    async (input) => {
+    async (input, options) => {
       calls += 1
       if (String(input).includes('/lyric/fcgi-bin')) return jsonResponse({ code: -1, lyric: '' })
-      return jsonResponse({ req_0: { data: { lyric: encoded, trans: '[00:01.00]translation' } } })
+      const body = JSON.parse(options.body)
+      assert.equal(body.req_0.module, 'music.musichallSong.PlayLyricInfo')
+      assert.equal(body.req_0.method, 'GetPlayLyricInfo')
+      assert.equal(body.req_0.param.crypt, 2)
+      return jsonResponse({
+        req_0: { data: { lyric: '[00:01.00]歌词', trans: '[00:01.00]translation' } }
+      })
     },
     async () => {
       const result = await harness.provider.current.getLyrics({ id: 'qq:mid-1' })

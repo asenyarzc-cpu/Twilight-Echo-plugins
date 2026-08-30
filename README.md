@@ -31,7 +31,7 @@ plugins/
     THIRD_PARTY_NOTICES.md
 packages/
   com.twilightecho.provider.bilibili-0.1.13.tep
-  com.twilightecho.provider.qqmusic-0.2.0.tep
+  com.twilightecho.provider.qqmusic-0.2.1.tep
   com.twilightecho.provider.kugou-0.2.3.tep
   com.twilightecho.provider.ytmusic-1.0.5.tep
 plugins.json
@@ -136,7 +136,7 @@ pnpm run pack:kugou
 - `plugins.json`
 
 `pnpm run pack:qqmusic` creates or updates
-`packages/com.twilightecho.provider.qqmusic-0.2.0.tep` and then refreshes
+`packages/com.twilightecho.provider.qqmusic-0.2.1.tep` and then refreshes
 `plugins.json`.
 
 `pnpm run pack:kugou` creates or updates
@@ -168,7 +168,7 @@ You can host the same files on any HTTPS server:
 ```text
 https://plugins.example.com/twilight/plugins.json
 https://plugins.example.com/twilight/packages/com.twilightecho.provider.bilibili-0.1.13.tep
-https://plugins.example.com/twilight/packages/com.twilightecho.provider.qqmusic-0.2.0.tep
+https://plugins.example.com/twilight/packages/com.twilightecho.provider.qqmusic-0.2.1.tep
 https://plugins.example.com/twilight/packages/com.twilightecho.provider.kugou-0.2.3.tep
 ```
 

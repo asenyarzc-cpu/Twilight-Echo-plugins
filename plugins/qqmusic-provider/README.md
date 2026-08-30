@@ -4,7 +4,7 @@ Twilight Echo 的 QQ 音乐 Provider 插件。
 
 - 插件 ID：`com.twilightecho.provider.qqmusic`
 - Provider ID：`qq`
-- 当前版本：`0.2.0`
+- 当前版本：`0.2.1`
 
 ## 功能
 
@@ -19,6 +19,8 @@ Twilight Echo 的 QQ 音乐 Provider 插件。
 - 受控设置表单中的免责声明确认
 
 插件只实现只读 Provider 能力，不提供下载、收藏写入、歌单写入、MV 或任何绕过访问限制的功能。
+
+`0.2.1` 将 Musicu 歌词请求切换为明文 LRC 响应，修复部分歌曲把十六进制密文直接显示为歌词的问题。
 
 ## 使用
 
