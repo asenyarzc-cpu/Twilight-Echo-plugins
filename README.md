@@ -17,9 +17,23 @@ plugins/
     index.mjs
     index.test.mjs
     README.md
+  qqmusic-provider/
+    plugin.json
+    index.mjs
+    index.test.mjs
+    README.md
+    THIRD_PARTY_NOTICES.md
+  kugou-provider/
+    plugin.json
+    index.mjs
+    index.test.mjs
+    README.md
+    THIRD_PARTY_NOTICES.md
 packages/
-  com.twilightecho.provider.bilibili-0.1.5.tep
-  com.twilightecho.provider.ytmusic-0.1.0.tep
+  com.twilightecho.provider.bilibili-0.1.13.tep
+  com.twilightecho.provider.qqmusic-0.2.0.tep
+  com.twilightecho.provider.kugou-0.2.3.tep
+  com.twilightecho.provider.ytmusic-1.0.5.tep
 plugins.json
 ```
 
@@ -63,6 +77,32 @@ Provider id: `ytm`
 Search and play YouTube Music tracks, with lyrics, playlists and the user
 media library. See `plugins/ytmusic-provider/README.md` for details.
 
+### QQ Music Provider
+
+Plugin id: `com.twilightecho.provider.qqmusic`
+
+Provider id: `qq`
+
+Search and play QQ Music tracks with homepage recommendations, discovery
+playlists, lyrics, QR login, user playlists and a local Range-capable stream
+proxy. Public catalogue requests follow Rain120/qq-music-api. The plugin
+requires an explicit disclaimer acknowledgement before it makes upstream requests. See
+`plugins/qqmusic-provider/README.md` for details.
+
+### KuGou Music Provider
+
+Plugin id: `com.twilightecho.provider.kugou`
+
+Provider id: `kugou`
+
+Search public KuGou Music tracks, artists and playlists, resolve KRC lyrics,
+scan a user library after QR login and relay audio through a local Range-capable
+stream proxy. It embeds a loopback-only KuGouMusicApi-compatible service and
+also accepts an explicitly configured user-run loopback service, never a public
+API host or third-party proxy. The plugin requires an explicit disclaimer
+acknowledgement before it makes requests. See
+`plugins/kugou-provider/README.md` for setup and limitations.
+
 ## Build And Test
 
 The pack script reuses the Twilight Echo app repository tooling. By default it
@@ -71,17 +111,42 @@ expects the app repository at `D:\Twilight_Echo-main`. Override that path with
 
 ```powershell
 $env:TWILIGHT_ECHO_ROOT="D:\Twilight_Echo-main"
-npm test
-npm run pack
+pnpm test
+pnpm run pack
 ```
 
-`npm run pack` creates or updates:
+To package the QQ Music provider specifically:
 
-- `packages/com.twilightecho.provider.bilibili-0.1.5.tep`
+```powershell
+$env:TWILIGHT_ECHO_ROOT="D:\Twilight_Echo-Pxasen"
+node scripts/pack-plugin.cjs qqmusic-provider
+node scripts/generate-index.mjs
+```
+
+To package the KuGou Music provider specifically:
+
+```powershell
+$env:TWILIGHT_ECHO_ROOT="D:\Twilight_Echo-Pxasen"
+pnpm run pack:kugou
+```
+
+`pnpm run pack` creates or updates:
+
+- `packages/com.twilightecho.provider.bilibili-0.1.13.tep`
 - `plugins.json`
 
+`pnpm run pack:qqmusic` creates or updates
+`packages/com.twilightecho.provider.qqmusic-0.2.0.tep` and then refreshes
+`plugins.json`.
+
+`pnpm run pack:kugou` creates or updates
+`packages/com.twilightecho.provider.kugou-0.2.3.tep` and then refreshes
+`plugins.json`.
+
 The generated package intentionally includes only runtime files such as
-`plugin.json` and `index.mjs`; tests and development files are excluded.
+`plugin.json` and `index.mjs`; tests and development files are excluded. If a
+plugin contains `THIRD_PARTY_NOTICES.md`, the packer includes that supplemental
+license/attribution file alongside the runtime files.
 
 ## Use From GitHub
 
@@ -89,11 +154,11 @@ After pushing this repository, use the raw `plugins.json` URL:
 
 ```powershell
 $env:TWILIGHT_PLUGIN_INDEX_URL="https://raw.githubusercontent.com/asenyarzc-cpu/Twilight-Echo-plugins/main/plugins.json"
-npm run dev
+pnpm run dev
 ```
 
 The index uses relative package URLs such as
-`packages/com.twilightecho.provider.bilibili-0.1.5.tep`, so Twilight Echo
+`packages/com.twilightecho.provider.bilibili-0.1.13.tep`, so Twilight Echo
 resolves the package from the same GitHub raw base URL.
 
 ## Use From Your Own Server
@@ -102,21 +167,23 @@ You can host the same files on any HTTPS server:
 
 ```text
 https://plugins.example.com/twilight/plugins.json
-https://plugins.example.com/twilight/packages/com.twilightecho.provider.bilibili-0.1.5.tep
+https://plugins.example.com/twilight/packages/com.twilightecho.provider.bilibili-0.1.13.tep
+https://plugins.example.com/twilight/packages/com.twilightecho.provider.qqmusic-0.2.0.tep
+https://plugins.example.com/twilight/packages/com.twilightecho.provider.kugou-0.2.3.tep
 ```
 
 Then point Twilight Echo at your server:
 
 ```powershell
 $env:TWILIGHT_PLUGIN_INDEX_URL="https://plugins.example.com/twilight/plugins.json"
-npm run dev
+pnpm run dev
 ```
 
 If your package files live under another base URL, regenerate the index:
 
 ```powershell
 $env:PLUGIN_BASE_URL="https://cdn.example.com/twilight/packages"
-npm run pack
+pnpm run pack
 ```
 
 Twilight Echo validates the `.tep` SHA-256 from `plugins.json` before

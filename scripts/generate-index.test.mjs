@@ -76,6 +76,32 @@ test('keeps only the latest package for each plugin id', async () => {
   assert.equal(index.plugins[0].sourceUrl, `packages/${manifest.id}-1.2.3.tep`)
 })
 
+test('adds the QQ Music tag for QQ Music provider packages', async () => {
+  const root = await createRepoFixture()
+  await createPluginPackage(root, {
+    ...manifest,
+    id: 'com.example.qqmusic',
+    name: 'QQ Music'
+  })
+
+  const index = await generatePluginIndex({ repoRoot: root })
+
+  assert.deepEqual(index.plugins[0].tags, ['tool', 'qq-music'])
+})
+
+test('adds the KuGou tag for KuGou provider packages', async () => {
+  const root = await createRepoFixture()
+  await createPluginPackage(root, {
+    ...manifest,
+    id: 'com.example.kugou',
+    name: 'KuGou Music'
+  })
+
+  const index = await generatePluginIndex({ repoRoot: root })
+
+  assert.deepEqual(index.plugins[0].tags, ['tool', 'kugou'])
+})
+
 test('rejects packages without plugin README and bundled plugin ids', async () => {
   const missingReadmeRoot = await createRepoFixture()
   await createPluginPackage(missingReadmeRoot, manifest, { readme: false })

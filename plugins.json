@@ -35,6 +35,72 @@
       "verified": true
     },
     {
+      "id": "com.twilightecho.provider.kugou",
+      "name": "酷狗音乐音源",
+      "version": "0.2.3",
+      "description": "内置 KuGouMusicApi 服务（随应用启动、仅监听本机），在 Twilight Echo 中搜索、播放和浏览酷狗音乐。",
+      "author": "Px_asen",
+      "license": "Apache-2.0",
+      "type": [
+        "provider",
+        "ui"
+      ],
+      "main": "index.mjs",
+      "engines": {
+        "twilightEcho": ">=0.20.0"
+      },
+      "apiVersion": 1,
+      "permissions": [
+        "network",
+        "settings",
+        "ui:inject",
+        "library:read"
+      ],
+      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "sourceUrl": "packages/com.twilightecho.provider.kugou-0.2.3.tep",
+      "checksumSha256": "af3ac6dc9e6879b5ad84213491bd0bb2b2f1a7528b22d05acdd936991eeec64a",
+      "tags": [
+        "provider",
+        "ui",
+        "kugou"
+      ],
+      "verified": true
+    },
+    {
+      "id": "com.twilightecho.provider.qqmusic",
+      "name": "QQ 音乐音源",
+      "version": "0.2.0",
+      "description": "在 Twilight Echo 中搜索、播放和浏览 QQ 音乐曲库，支持首页推荐、发现歌单、歌词、原生扫码登录与用户歌单。",
+      "author": "Px_asen",
+      "license": "Apache-2.0",
+      "type": [
+        "provider",
+        "ui"
+      ],
+      "main": "index.mjs",
+      "engines": {
+        "twilightEcho": ">=0.20.0"
+      },
+      "apiVersion": 1,
+      "permissions": [
+        "network",
+        "settings",
+        "ui:inject",
+        "library:read"
+      ],
+      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "sourceUrl": "packages/com.twilightecho.provider.qqmusic-0.2.0.tep",
+      "checksumSha256": "bc4d3dca253d5309587cbeb6a7346a86f54643047254de3393142ea5e252f6df",
+      "tags": [
+        "provider",
+        "ui",
+        "qq-music"
+      ],
+      "verified": true
+    },
+    {
       "id": "com.twilightecho.provider.ytmusic",
       "name": "YouTube Music 音源",
       "version": "1.0.5",

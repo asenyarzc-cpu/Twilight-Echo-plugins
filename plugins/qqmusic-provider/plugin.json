@@ -1,0 +1,25 @@
+{
+  "id": "com.twilightecho.provider.qqmusic",
+  "name": "QQ 音乐音源",
+  "version": "0.2.0",
+  "description": "在 Twilight Echo 中搜索、播放和浏览 QQ 音乐曲库，支持首页推荐、发现歌单、歌词、原生扫码登录与用户歌单。",
+  "author": "Px_asen",
+  "license": "Apache-2.0",
+  "type": [
+    "provider",
+    "ui"
+  ],
+  "main": "index.mjs",
+  "engines": {
+    "twilightEcho": ">=0.20.0"
+  },
+  "apiVersion": 1,
+  "permissions": [
+    "network",
+    "settings",
+    "ui:inject",
+    "library:read"
+  ],
+  "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+  "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins"
+}

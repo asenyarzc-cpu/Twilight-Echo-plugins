@@ -85,7 +85,7 @@ export async function generatePluginIndex(options = {}) {
   if (options.validateOnly) {
     const existing = await readFile(indexPath, 'utf-8')
     if (existing !== serialized) {
-      throw new Error('plugins.json is out of date; run npm run index')
+      throw new Error('plugins.json is out of date; run pnpm run index')
     }
   }
   if (options.write) await writeFile(indexPath, serialized, 'utf-8')
@@ -153,6 +153,8 @@ function inferTags(manifest) {
   const id = String(manifest.id ?? '').toLowerCase()
   if (id.includes('bilibili')) tags.add('bilibili')
   if (id.includes('ytmusic') || id.includes('youtube')) tags.add('youtube-music')
+  if (id.includes('qqmusic') || id.includes('qq-music')) tags.add('qq-music')
+  if (id.includes('kugou')) tags.add('kugou')
   return [...tags]
 }
 

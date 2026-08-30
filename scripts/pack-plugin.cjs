@@ -50,6 +50,23 @@ async function main() {
       await fs.copyFile(path.join(pluginRoot, binaryPath), path.join(stagingDir, binaryPath))
     }
   }
+  for (const supplementalFile of ['THIRD_PARTY_NOTICES.md']) {
+    try {
+      await fs.copyFile(path.join(pluginRoot, supplementalFile), path.join(stagingDir, supplementalFile))
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  // vendor/ 目录（如内嵌的上游 bundle）随包分发
+  const vendorDir = path.join(pluginRoot, 'vendor')
+  try {
+    const vendorStat = await fs.stat(vendorDir)
+    if (vendorStat.isDirectory()) {
+      await fs.cp(vendorDir, path.join(stagingDir, 'vendor'), { recursive: true })
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
 
   await createZip(stagingDir, packagePath)
   await fs.rm(stagingDir, { recursive: true, force: true })
@@ -59,7 +76,7 @@ async function main() {
 
   console.log(`Packed ${packagePath}`)
   console.log(`sha256 ${checksumSha256}`)
-  console.log('Run npm run index to refresh plugins.json')
+  console.log('Run node scripts/generate-index.mjs to refresh plugins.json')
 }
 
 main().catch((error) => {

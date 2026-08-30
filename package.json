@@ -5,11 +5,18 @@
   "description": "Official and reviewed plugin index for Twilight Echo.",
   "license": "Apache-2.0",
   "type": "module",
+  "packageManager": "pnpm@11.7.0",
   "scripts": {
     "test": "node --test plugins/*/*.test.mjs scripts/*.test.mjs",
     "index": "node scripts/generate-index.mjs",
     "validate:index": "node scripts/generate-index.mjs --validate",
-    "pack": "node scripts/pack-plugin.cjs bilibili-provider && npm run index",
-    "pack:bilibili": "node scripts/pack-plugin.cjs bilibili-provider && npm run index"
+    "pack": "node scripts/pack-plugin.cjs bilibili-provider && pnpm run index",
+    "pack:bilibili": "node scripts/pack-plugin.cjs bilibili-provider && pnpm run index",
+    "pack:qqmusic": "node scripts/pack-plugin.cjs qqmusic-provider && pnpm run index",
+    "pack:kugou": "node scripts/pack-plugin.cjs kugou-provider && pnpm run index",
+    "build:kugou-vendor": "node scripts/build-kugou-vendor.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }
