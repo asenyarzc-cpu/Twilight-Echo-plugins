@@ -37,8 +37,8 @@
     {
       "id": "com.twilightecho.provider.kugou",
       "name": "酷狗音乐音源",
-      "version": "0.2.3",
-      "description": "内置 KuGouMusicApi 服务（随应用启动、仅监听本机），在 Twilight Echo 中搜索、播放和浏览酷狗音乐。",
+      "version": "0.3.0",
+      "description": "酷狗每日推荐、私人 FM、飙升榜与 Hi-Res 歌单，支持搜索、播放、歌词和扫码登录；API 服务内置并仅监听本机。",
       "author": "Px_asen",
       "license": "Apache-2.0",
       "type": [
@@ -58,8 +58,8 @@
       ],
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "sourceUrl": "packages/com.twilightecho.provider.kugou-0.2.3.tep",
-      "checksumSha256": "af3ac6dc9e6879b5ad84213491bd0bb2b2f1a7528b22d05acdd936991eeec64a",
+      "sourceUrl": "packages/com.twilightecho.provider.kugou-0.3.0.tep",
+      "checksumSha256": "4277e6c95fd499375b42c3cbf7e1bb8b631ebfd32d899affd36b47207a365232",
       "tags": [
         "provider",
         "ui",
@@ -70,8 +70,8 @@
     {
       "id": "com.twilightecho.provider.qqmusic",
       "name": "QQ 音乐音源",
-      "version": "0.2.1",
-      "description": "在 Twilight Echo 中搜索、播放和浏览 QQ 音乐曲库，支持首页推荐、发现歌单、歌词、原生扫码登录与用户歌单。",
+      "version": "0.3.1",
+      "description": "QQ 音乐每日推荐、巅峰飙升榜、热歌榜与精选歌单，支持发现分类、搜索、歌词、原生扫码登录和用户歌单。",
       "author": "Px_asen",
       "license": "Apache-2.0",
       "type": [
@@ -91,8 +91,8 @@
       ],
       "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
       "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "sourceUrl": "packages/com.twilightecho.provider.qqmusic-0.2.1.tep",
-      "checksumSha256": "58c2a6ba10e3a4173b430cc27227f24b7bfc8d5eb4ce6c3da81224e02510bd9a",
+      "sourceUrl": "packages/com.twilightecho.provider.qqmusic-0.3.1.tep",
+      "checksumSha256": "12149082271fc52d710e11004308ab96bbcb59c1bc4a0681140befa7583f716a",
       "tags": [
         "provider",
         "ui",

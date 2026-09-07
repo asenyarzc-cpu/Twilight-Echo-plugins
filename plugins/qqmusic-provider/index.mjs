@@ -81,12 +81,35 @@ export async function activate(context) {
       authType: 'qr',
       loginInstructions: '请先在设置中确认免责声明，再使用 QQ 音乐二维码登录',
       qrStatusCodes: { waiting: 66, scanned: 67, expired: 65, success: 0 },
+      streamingHome: { requiresLogin: false, subtitle: '每天，都有懂你的好音乐。' },
       streamingSections: [
         {
-          id: 'new-songs',
-          title: '新歌推荐',
-          icon: 'pi pi-sparkles',
-          method: 'fetchRecommendSongs'
+          id: 'daily',
+          title: '每日推荐',
+          icon: 'pi pi-sun',
+          method: 'fetchRecommendSongs',
+          args: ['daily'],
+          requiresLogin: true,
+          eyebrow: 'DAILY DISCOVERY',
+          description: '来自 QQ 音乐的每日30首，把适合你的旋律放进今天。'
+        },
+        {
+          id: 'soaring',
+          title: '巅峰 · 飙升榜',
+          icon: 'pi pi-chart-line',
+          method: 'fetchRecommendSongs',
+          args: ['soaring'],
+          eyebrow: 'RISING NOW',
+          description: '正在被更多人听见的好歌，每日更新。'
+        },
+        {
+          id: 'hot',
+          title: '巅峰 · 热歌榜',
+          icon: 'pi pi-bolt',
+          method: 'fetchRecommendSongs',
+          args: ['hot'],
+          eyebrow: 'MOST PLAYED',
+          description: 'QQ 音乐的人气之选，找到值得循环的那一首。'
         }
       ],
       streamingLibraryTab: true,
@@ -445,11 +468,11 @@ function nativeQimeiIsFresh(device) {
   const savedAt = Number(device?.qimeiSavedAt)
   return Boolean(
     device?.qimei &&
-      device?.qimei36 &&
-      Number.isFinite(savedAt) &&
-      savedAt > 0 &&
-      Date.now() - savedAt >= 0 &&
-      Date.now() - savedAt < NATIVE_QIMEI_TTL_MS
+    device?.qimei36 &&
+    Number.isFinite(savedAt) &&
+    savedAt > 0 &&
+    Date.now() - savedAt >= 0 &&
+    Date.now() - savedAt < NATIVE_QIMEI_TTL_MS
   )
 }
 
@@ -555,8 +578,14 @@ function createNativeQimeiPayload(device) {
 }
 
 function encryptNativeQimeiPayload(payload, cryptKey) {
-  const cipher = createCipheriv('aes-128-cbc', Buffer.from(cryptKey, 'utf8'), Buffer.from(cryptKey, 'utf8'))
-  return Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]).toString('base64')
+  const cipher = createCipheriv(
+    'aes-128-cbc',
+    Buffer.from(cryptKey, 'utf8'),
+    Buffer.from(cryptKey, 'utf8')
+  )
+  return Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]).toString(
+    'base64'
+  )
 }
 
 function createNativeBeaconId() {
@@ -620,7 +649,9 @@ function createNativeImei() {
 }
 
 function randomHex(length) {
-  return randomBytes(Math.ceil(length / 2)).toString('hex').slice(0, length)
+  return randomBytes(Math.ceil(length / 2))
+    .toString('hex')
+    .slice(0, length)
 }
 
 function randomDigits(length) {
@@ -825,7 +856,9 @@ async function consumeNativeQrEvents(queue, qrcodeId, ttlMs, onEvent) {
 function handleNativeQrEvent(key, event) {
   const session = qrSessions.get(key)
   if (!session || ['success', 'failed', 'expired'].includes(session.state)) return
-  const type = String(event?.type || '').trim().toLowerCase()
+  const type = String(event?.type || '')
+    .trim()
+    .toLowerCase()
   if (['waiting', 'wait', 'created'].includes(type)) {
     session.state = 'waiting'
     return
@@ -846,7 +879,9 @@ function handleNativeQrEvent(key, event) {
       .catch((error) => handleNativeQrExchangeFailure(key, error))
     return
   }
-  if (['expired', 'timeout', 'cancel', 'canceled', 'failed', 'loginfailed', 'error'].includes(type)) {
+  if (
+    ['expired', 'timeout', 'cancel', 'canceled', 'failed', 'loginfailed', 'error'].includes(type)
+  ) {
     session.state = 'expired'
     session.listener?.close()
   }
@@ -869,7 +904,8 @@ async function completeNativeQrLogin(session, payload) {
   )
   const credential = normalizeNativeCredential({
     musicid:
-      findNestedValue(exchanged, ['musicid', 'str_musicid', 'uin', 'qqmusic_uin']) || credentials.uin,
+      findNestedValue(exchanged, ['musicid', 'str_musicid', 'uin', 'qqmusic_uin']) ||
+      credentials.uin,
     musickey: findNestedValue(exchanged, ['musickey', 'qqmusic_key', 'qm_keyst']),
     loginType: findNestedValue(exchanged, ['loginType', 'tmeLoginType']) || 6,
     encryptUin: findNestedValue(exchanged, ['encryptUin', 'encrypt_uin'])
@@ -918,7 +954,11 @@ function extractNativeQrCredentials(payload) {
 
 function nativeCredentialValue(value) {
   if (typeof value === 'string' || typeof value === 'number') return String(value).trim()
-  if (value && typeof value === 'object' && (typeof value.value === 'string' || typeof value.value === 'number')) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    (typeof value.value === 'string' || typeof value.value === 'number')
+  ) {
     return String(value.value).trim()
   }
   return ''
@@ -1028,7 +1068,7 @@ function nativeMqttPropertyBlock(properties) {
 }
 
 function parseNativeMqttConnack(packet) {
-  if ((packet[0] >> 4) !== 2) throw new Error('QQ 音乐二维码连接响应无效')
+  if (packet[0] >> 4 !== 2) throw new Error('QQ 音乐二维码连接响应无效')
   const remaining = nativeMqttReadVarInt(packet, 1)
   const offset = remaining.offset
   if (packet.length < offset + 3) throw new Error('QQ 音乐二维码连接响应无效')
@@ -1037,7 +1077,7 @@ function parseNativeMqttConnack(packet) {
 }
 
 function parseNativeMqttSuback(packet) {
-  if ((packet[0] >> 4) !== 9) throw new Error('QQ 音乐二维码订阅响应无效')
+  if (packet[0] >> 4 !== 9) throw new Error('QQ 音乐二维码订阅响应无效')
   const remaining = nativeMqttReadVarInt(packet, 1)
   const offset = remaining.offset
   if (packet.length < offset + 4) throw new Error('QQ 音乐二维码订阅响应无效')
@@ -1047,7 +1087,7 @@ function parseNativeMqttSuback(packet) {
 }
 
 function parseNativeMqttPublish(packet) {
-  if ((packet[0] >> 4) !== 3) return null
+  if (packet[0] >> 4 !== 3) return null
   const remaining = nativeMqttReadVarInt(packet, 1)
   let offset = remaining.offset
   const topic = nativeMqttReadText(packet, offset)
@@ -1109,7 +1149,10 @@ function nativeMqttReadText(buffer, start) {
   const length = buffer.readUInt16BE(start)
   const offset = start + 2
   if (offset + length > buffer.length) throw new Error('QQ 音乐二维码协议数据不完整')
-  return { value: buffer.subarray(offset, offset + length).toString('utf8'), offset: offset + length }
+  return {
+    value: buffer.subarray(offset, offset + length).toString('utf8'),
+    offset: offset + length
+  }
 }
 
 function nativeMqttReadProperties(buffer, start) {
@@ -1198,11 +1241,14 @@ function createNativeMqttQueue() {
       if (failure) return Promise.reject(failure)
       return new Promise((resolve, reject) => {
         const waiter = { resolve, reject, timeout: null }
-        waiter.timeout = setTimeout(() => {
-          const index = waiters.indexOf(waiter)
-          if (index >= 0) waiters.splice(index, 1)
-          reject(new Error('QQ 音乐二维码状态等待超时'))
-        }, Math.max(1, Number(timeoutMs) || NATIVE_QR_MQTT_TIMEOUT_MS))
+        waiter.timeout = setTimeout(
+          () => {
+            const index = waiters.indexOf(waiter)
+            if (index >= 0) waiters.splice(index, 1)
+            reject(new Error('QQ 音乐二维码状态等待超时'))
+          },
+          Math.max(1, Number(timeoutMs) || NATIVE_QR_MQTT_TIMEOUT_MS)
+        )
         waiters.push(waiter)
       })
     }
@@ -1212,8 +1258,10 @@ function createNativeMqttQueue() {
 async function nativeMqttBuffer(value) {
   if (Buffer.isBuffer(value)) return value
   if (value instanceof ArrayBuffer) return Buffer.from(value)
-  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
-  if (value && typeof value.arrayBuffer === 'function') return Buffer.from(await value.arrayBuffer())
+  if (ArrayBuffer.isView(value))
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength)
+  if (value && typeof value.arrayBuffer === 'function')
+    return Buffer.from(await value.arrayBuffer())
   throw new Error('QQ 音乐二维码状态数据无效')
 }
 
@@ -1316,8 +1364,59 @@ async function searchArtists(keywords, limit = 30, offset = 0, requestContext) {
   }
 }
 
-async function fetchRecommendSongs(requestContext) {
+async function fetchRecommendSongs(section = 'daily', requestContext) {
+  if (section && typeof section === 'object') {
+    requestContext = section
+    section = 'daily'
+  }
   await assertConsent()
+  if (section === 'daily') {
+    const auth = await requireAuth()
+    const data = await callNativeMusicu(
+      'music.srfDissInfo.DissInfo',
+      'CgiGetDiss',
+      {
+        disstid: 0,
+        dirid: 202,
+        song_begin: 0,
+        song_num: 30,
+        tag: true,
+        userinfo: true,
+        orderlist: true,
+        enc_host_uin: auth.credential.encryptUin || ''
+      },
+      { device: auth.device, credential: auth.credential, requestContext }
+    )
+    const tracks = extractNativePlaylistTracks(data).map(mapTrack).filter(Boolean)
+    if (!tracks.length) throw new Error('QQ 音乐暂未生成每日推荐，请稍后刷新')
+    return tracks
+  }
+  if (section === 'soaring' || section === 'hot') {
+    const topId = section === 'soaring' ? 62 : 26
+    const catalogue = await fetchPublicMusicu(
+      {
+        toplist: { module: 'musicToplist.ToplistInfoServer', method: 'GetAll', param: {} }
+      },
+      requestContext
+    )
+    const groups = firstArray(publicMusicuData(catalogue, 'toplist').group)
+    const chart = groups
+      .flatMap((group) => firstArray(group.toplist))
+      .find((entry) => Number(entry.topId) === topId)
+    if (!chart?.period) throw new Error('QQ 音乐榜单当前期数不可用')
+    const payload = await fetchPublicMusicu(
+      {
+        chart: {
+          module: 'musicToplist.ToplistInfoServer',
+          method: 'GetDetail',
+          param: { topId, period: chart.period, offset: 0, num: 30 }
+        }
+      },
+      requestContext
+    )
+    return firstArray(publicMusicuData(payload, 'chart').songInfoList).map(mapTrack).filter(Boolean)
+  }
+  if (section !== 'new') throw new Error('QQ 音乐首页分区不存在')
   const payload = await fetchPublicMusicu(
     {
       new_song: {
@@ -1543,12 +1642,11 @@ async function fetchPlaylistTracks(playlistId, force = false, requestContext) {
           tag: true,
           userinfo: true
         }
-  const payload = await callNativeMusicu(
-    'music.srfDissInfo.DissInfo',
-    'CgiGetDiss',
-    param,
-    { device: auth.device, credential: auth.credential, requestContext }
-  )
+  const payload = await callNativeMusicu('music.srfDissInfo.DissInfo', 'CgiGetDiss', param, {
+    device: auth.device,
+    credential: auth.credential,
+    requestContext
+  })
   const list = extractNativePlaylistTracks(payload)
   const tracks = list.map(mapTrack).filter(Boolean)
   playlistCache.set(id, { tracks, expiresAt: Date.now() + PLAYLIST_CACHE_TTL_MS })
@@ -1652,7 +1750,9 @@ async function getLyrics(track, requestContext) {
         },
         requestContext
       )
-      normalized = normalizeLyrics(fallback?.req_0?.data || fallback?.PlayLyricInfo?.data || fallback)
+      normalized = normalizeLyrics(
+        fallback?.req_0?.data || fallback?.PlayLyricInfo?.data || fallback
+      )
     } catch (error) {
       if (requestSignal(requestContext)?.aborted || error?.name === 'AbortError') throw error
       logWarn(`QQ lyric fallback request failed: ${safeErrorMessage(error)}`)
@@ -1784,9 +1884,15 @@ async function handleStreamRequest(request, response) {
     if (!auth) throw new Error('QQ 音乐登录态已失效，请重新扫码登录')
     let upstream = await fetchStream(entry.directUrl, request, auth, controller.signal)
     if ([401, 403, 404].includes(upstream.status)) {
-      const refreshedUrl = await resolveDirectUrl(entry.songmid, entry.mediaMid, entry.quality, auth, {
-        signal: controller.signal
-      })
+      const refreshedUrl = await resolveDirectUrl(
+        entry.songmid,
+        entry.mediaMid,
+        entry.quality,
+        auth,
+        {
+          signal: controller.signal
+        }
+      )
       if (refreshedUrl) {
         entry.directUrl = refreshedUrl
         upstream = await fetchStream(refreshedUrl, request, auth, controller.signal)
@@ -1829,11 +1935,7 @@ async function fetchStream(url, request, auth, signal) {
     Cookie: auth.cookie
   }
   if (typeof range === 'string' && /^bytes=\d*-\d*$/.test(range)) headers.Range = range
-  return fetchWithTimeout(
-    url,
-    { headers, signal },
-    STREAM_HEADER_TIMEOUT_MS
-  )
+  return fetchWithTimeout(url, { headers, signal }, STREAM_HEADER_TIMEOUT_MS)
 }
 
 function copyStreamHeaders(headers) {
@@ -1865,7 +1967,14 @@ async function readAuth() {
   if (!value || typeof value !== 'object') return null
   const credential = normalizeNativeCredential(value.credential)
   const device = await readNativeDevice()
-  if (!credential || !device || !device.qimei || !device.qimei36 || !device.sessionUid || !device.sessionSid) {
+  if (
+    !credential ||
+    !device ||
+    !device.qimei ||
+    !device.qimei36 ||
+    !device.sessionUid ||
+    !device.sessionSid
+  ) {
     return null
   }
   const uin = credential.musicid
@@ -1913,7 +2022,8 @@ function normalizeNativeCredential(value) {
   const musickey = nativeCredentialValue(value.musickey || value.qqmusic_key || value.qm_keyst)
   if (!musicid || !musickey || /[;\r\n]/.test(musickey)) return null
   const requestedLoginType = Number(value.loginType || value.tmeLoginType || 6)
-  const loginType = Number.isFinite(requestedLoginType) && requestedLoginType > 0 ? requestedLoginType : 6
+  const loginType =
+    Number.isFinite(requestedLoginType) && requestedLoginType > 0 ? requestedLoginType : 6
   const encryptUin = nativeDeviceText(value.encryptUin || value.encrypt_uin, 512)
   return {
     musicid,
@@ -1985,9 +2095,7 @@ async function assertConsent() {
 
 async function hasConsent() {
   const value = await requireContext().settings.get(CONSENT_KEY)
-  return Boolean(
-    value && typeof value === 'object' && value.disclaimerVersion === CONSENT_VERSION
-  )
+  return Boolean(value && typeof value === 'object' && value.disclaimerVersion === CONSENT_VERSION)
 }
 
 function requireContext() {
@@ -2033,7 +2141,9 @@ async function fetchWithTimeout(input, options = {}, timeoutMs) {
   if (externalSignal?.aborted) throw externalSignal.reason || abortError()
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(abortError()), timeoutMs)
-  const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal
+  const signal = externalSignal
+    ? AbortSignal.any([controller.signal, externalSignal])
+    : controller.signal
   try {
     return await fetch(input, { ...options, signal })
   } finally {
@@ -2042,7 +2152,9 @@ async function fetchWithTimeout(input, options = {}, timeoutMs) {
 }
 
 function parseJsonp(text) {
-  const normalized = String(text || '').replace(/^\uFEFF/, '').trim()
+  const normalized = String(text || '')
+    .replace(/^\uFEFF/, '')
+    .trim()
   if (!normalized) return {}
   try {
     return JSON.parse(normalized)
@@ -2096,7 +2208,9 @@ function mapTrack(item) {
   const albumName = String(item.albumname || album.name || album.title || '').trim()
   const albumMid = String(item.albummid || album.mid || album.midd || '').trim()
   const file = item.file && typeof item.file === 'object' ? item.file : {}
-  const mediaMid = String(item.media_mid || item.mediaMid || file.media_mid || file.mediaMid || '').trim()
+  const mediaMid = String(
+    item.media_mid || item.mediaMid || file.media_mid || file.mediaMid || ''
+  ).trim()
   const id = `qq:${mid}`
   return {
     id,
@@ -2134,7 +2248,9 @@ function mapPlaylist(item, fallbackCreator) {
       ''
   ).trim()
   if (!id) return null
-  const name = String(item.dissname || item.diss_name || item.title || item.name || 'QQ 音乐歌单').trim()
+  const name = String(
+    item.dissname || item.diss_name || item.title || item.name || 'QQ 音乐歌单'
+  ).trim()
   const cover = normalizeHttpUrl(
     item.logo ||
       item.picurl ||
@@ -2359,7 +2475,8 @@ function qualityLadder(value) {
   ) {
     return ['flac', '320', '128']
   }
-  if (normalized === '320' || normalized === 'high' || normalized === 'exhigh') return ['320', '128']
+  if (normalized === '320' || normalized === 'high' || normalized === 'exhigh')
+    return ['320', '128']
   return ['128']
 }
 
@@ -2413,7 +2530,9 @@ function albumCover(mid) {
 }
 
 function sanitizeFileName(value) {
-  return String(value || 'QQ Music').replace(/[\\/:*?"<>|]/g, '_').slice(0, 180)
+  return String(value || 'QQ Music')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .slice(0, 180)
 }
 
 function normalizeHttpUrl(value) {
@@ -2430,7 +2549,12 @@ function normalizeHttpUrl(value) {
 function pickPlayableDomain(value) {
   const values = Array.isArray(value) ? value : [value]
   const urls = values.filter((item) => typeof item === 'string' && item.trim())
-  return urls.find((url) => !url.startsWith('http://ws')) || urls.find((url) => url.startsWith('https://')) || urls[0] || ''
+  return (
+    urls.find((url) => !url.startsWith('http://ws')) ||
+    urls.find((url) => url.startsWith('https://')) ||
+    urls[0] ||
+    ''
+  )
 }
 
 function joinUrl(domain, path) {
@@ -2448,7 +2572,9 @@ function purgeExpiredStreamTokens() {
 }
 
 function normalizeUin(value) {
-  const text = String(value || '').trim().replace(/^o/i, '')
+  const text = String(value || '')
+    .trim()
+    .replace(/^o/i, '')
   return text && /^[0-9]+$/.test(text) ? text : ''
 }
 
@@ -2464,7 +2590,10 @@ function findNestedValue(value, names) {
   }
   for (const name of names) {
     const candidate = value[name]
-    if ((typeof candidate === 'string' || typeof candidate === 'number') && String(candidate).trim()) {
+    if (
+      (typeof candidate === 'string' || typeof candidate === 'number') &&
+      String(candidate).trim()
+    ) {
       return String(candidate).trim()
     }
   }

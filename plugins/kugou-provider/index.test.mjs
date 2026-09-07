@@ -884,6 +884,176 @@ test('identifies a non-KuGou external service before accepting a stream response
   )
 })
 
+test('homepage consent protects every new entry point before upstream requests', async () => {
+  const harness = await startPlugin()
+  await withFetch(
+    () => {
+      throw new Error('Unexpected upstream request')
+    },
+    async () => {
+      for (const method of [
+        'fetchRecommendSongs',
+        'fetchPersonalFm',
+        'fetchRecommendPlaylists',
+        'fetchPlaylistCategories',
+        'fetchDiscoveryPlaylists'
+      ]) {
+        await assert.rejects(() => harness.provider.current[method](), /免责声明/)
+      }
+    }
+  )
+})
+
+test('homepage loads daily songs, fresh FM batches and nested rising chart tracks without login', async () => {
+  const harness = await startPlugin({ consent: { disclaimerVersion: CONSENT_VERSION } })
+  const provider = harness.provider.current
+  const timestamps = []
+  await withFetch(
+    async (input) => {
+      const url = new URL(input)
+      assert.equal(url.searchParams.has('token'), false)
+      if (url.pathname === '/rank/audio') {
+        assert.equal(url.searchParams.get('rankid'), '6666')
+        assert.equal(url.searchParams.get('pagesize'), '30')
+        return jsonResponse({
+          data: {
+            songlist: [
+              {
+                songname: '上升的歌',
+                author_name: '歌手',
+                album_id: 100,
+                album_audio_id: 200,
+                audio_info: { hash_128: 'abcd', duration_128: 180000, filesize_128: 4000 },
+                album_info: {
+                  album_name: '新专辑',
+                  sizable_cover: 'https://img.example/{size}.jpg'
+                }
+              }
+            ]
+          }
+        })
+      }
+      assert.ok(['/everyday/recommend', '/personal/fm'].includes(url.pathname))
+      timestamps.push(url.searchParams.get('timestamp'))
+      return jsonResponse({
+        data: {
+          song_list: [
+            { hash: 'daily123', songname: '日推', sizable_cover: 'https://img.example/{size}.jpg' }
+          ]
+        }
+      })
+    },
+    async () => {
+      assert.equal(provider.ui.streamingHome.requiresLogin, false)
+      for (const section of provider.ui.streamingSections) {
+        const tracks = await provider[section.method](...(section.args || []), {
+          signal: new AbortController().signal
+        })
+        assert.equal(tracks.length, 1)
+        assert.equal(tracks[0].cover, 'https://img.example/400.jpg')
+        if (section.id === 'rising') {
+          assert.equal(tracks[0].id, 'kugou:ABCD')
+          assert.equal(tracks[0].duration, 180)
+          assert.equal(tracks[0].album, '新专辑')
+          assert.equal(tracks[0].providerAlbumAudioId, '200')
+        }
+      }
+      await provider.fetchPersonalFm()
+      assert.equal(new Set(timestamps).size, timestamps.length)
+    }
+  )
+})
+
+test('Hi-Res discovery uses upstream category and has-next without inventing totals or song counts', async () => {
+  const harness = await startPlugin({ consent: { disclaimerVersion: CONSENT_VERSION } })
+  await withFetch(
+    async (input) => {
+      const url = new URL(input)
+      assert.equal(url.pathname, '/top/playlist')
+      assert.equal(url.searchParams.get('category_id'), '11292')
+      assert.equal(url.searchParams.get('page'), '2')
+      assert.equal(url.searchParams.get('pagesize'), '10')
+      return jsonResponse({
+        data: {
+          has_next: 1,
+          special_list: [
+            {
+              global_collection_id: 'collection_3_123_10_0',
+              specialid: 12,
+              specialname: 'Hi-Res 精选',
+              flexible_cover: 'https://img.example/{size}.jpg',
+              play_count: 25000,
+              songs: [{ hash: 'preview-only' }]
+            }
+          ]
+        }
+      })
+    },
+    async () => {
+      const catalogue = await harness.provider.current.fetchPlaylistCategories()
+      assert.ok(catalogue.hotTags.includes('Hi-Res'))
+      const page = await harness.provider.current.fetchDiscoveryPlaylists('Hi-Res', 'hot', 10, 10)
+      assert.equal(page.items[0].id, 'collection_3_123_10_0')
+      assert.equal(page.items[0].playCount, 25000)
+      assert.equal(page.items[0].trackCount, 0)
+      assert.equal(page.total, 0)
+      assert.equal(page.hasMore, true)
+      assert.equal(page.offset, 10)
+    }
+  )
+})
+
+test('playlist details continue past unavailable songs to fetch every page', async () => {
+  const harness = await startPlugin({
+    consent: { disclaimerVersion: CONSENT_VERSION },
+    device: { platform: 'lite', dfid: 'test-device', cookies: {} }
+  })
+  const pages = []
+  await withFetch(
+    async (input) => {
+      const url = new URL(input)
+      assert.equal(url.pathname, '/playlist/track/all')
+      const page = Number(url.searchParams.get('page'))
+      pages.push(page)
+      const songs =
+        page === 1
+          ? Array.from({ length: 50 }, (_, i) =>
+              i === 0 ? {} : { hash: `hash-${i}`, songname: `歌曲 ${i}` }
+            )
+          : [{ hash: 'last', songname: '最后一首' }]
+      return jsonResponse({ data: { count: 51, songs } })
+    },
+    async () => {
+      const tracks = await harness.provider.current.fetchPlaylistTracks('collection_3_123_10_0')
+      assert.deepEqual(pages, [1, 2])
+      assert.equal(tracks.length, 50)
+      assert.equal(tracks.at(-1).title, '最后一首')
+    }
+  )
+})
+
+test('discovery bounds upstream appended playlists to the requested page size', async () => {
+  const harness = await startPlugin({ consent: { disclaimerVersion: CONSENT_VERSION } })
+  await withFetch(
+    async () =>
+      jsonResponse({
+        data: {
+          has_next: 1,
+          special_list: Array.from({ length: 33 }, (_, i) => ({
+            global_collection_id: `collection_${i}`,
+            specialname: `歌单 ${i}`
+          }))
+        }
+      }),
+    async () => {
+      const result = await harness.provider.current.fetchDiscoveryPlaylists('全部', 'hot', 12, 0)
+      assert.equal(result.items.length, 12)
+      assert.equal(result.total, 0)
+      assert.equal(result.hasMore, true)
+    }
+  )
+})
+
 function createHarness(initialSettings = {}) {
   const values = new Map(Object.entries(initialSettings))
   const handlers = new Map()

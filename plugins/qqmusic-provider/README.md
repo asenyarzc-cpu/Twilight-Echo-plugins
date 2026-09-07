@@ -4,12 +4,12 @@ Twilight Echo 的 QQ 音乐 Provider 插件。
 
 - 插件 ID：`com.twilightecho.provider.qqmusic`
 - Provider ID：`qq`
-- 当前版本：`0.2.1`
+- 当前版本：`0.3.1`
 
 ## 功能
 
 - 搜索 QQ 音乐歌曲、歌手和歌单
-- 首页新歌推荐和推荐歌单
+- 首页每日推荐、巅峰飙升榜、巅峰热歌榜和精选歌单；每日推荐需要登录，榜单与歌单在确认免责声明后可公开浏览
 - 发现歌单分类、最新/最热排序和分页加载
 - 无需登录即可浏览公开歌单曲目
 - 通过 QQ 音乐 vkey 获取已授权的播放地址
@@ -21,6 +21,17 @@ Twilight Echo 的 QQ 音乐 Provider 插件。
 插件只实现只读 Provider 能力，不提供下载、收藏写入、歌单写入、MV 或任何绕过访问限制的功能。
 
 `0.2.1` 将 Musicu 歌词请求切换为明文 LRC 响应，修复部分歌曲把十六进制密文直接显示为歌词的问题。
+
+`0.3.1` 首屏接入真正的每日推荐，对应 QQ 音乐客户端“每日30首”。使用登录会话调用
+`music.srfDissInfo.DissInfo.CgiGetDiss`（`disstid: 0, dirid: 202, song_num: 30`），保留完整播放标识。
+该目录由 `music.recommend.RecommendFeed.get_recommend_feed` 的“每日30首”卡片核实，且已实测返回 30 首。
+分区声明 `requiresLogin: true`，未登录时展示登录入口，公开榜单仍可浏览。
+宿主需包含首页响应式参数的 IPC 转换修复，否则带参数的日推和榜单无法到达插件。
+
+`0.3.0` 补齐三个首页分区，并声明绿色品牌首页。
+巅峰榜先通过 `musicToplist.ToplistInfoServer.GetAll` 获取各榜当前 `period`，再由 `GetDetail` 返回完整歌曲，
+保留 `mid`、`media_mid`、专辑和歌手信息以进入现有播放队列。榜单是公开音乐内容，不宣称个人偏好推荐。
+品牌首页由支持 `ui.streamingHome` 的宿主提供，旧宿主仍能读取三个标准推荐分区。
 
 ## 使用
 

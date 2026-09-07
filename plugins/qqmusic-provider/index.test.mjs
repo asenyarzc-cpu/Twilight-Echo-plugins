@@ -160,7 +160,9 @@ class FakeMqttWebSocket {
     this.sent.push(packet)
     const type = packet[0] >> 4
     if (type === 1) {
-      queueMicrotask(() => this.emit('message', { data: mqttConnack(FakeMqttWebSocket.plan.connackCode || 0) }))
+      queueMicrotask(() =>
+        this.emit('message', { data: mqttConnack(FakeMqttWebSocket.plan.connackCode || 0) })
+      )
       return
     }
     if (type === 8) {
@@ -267,7 +269,9 @@ function nativeQrFetch(qrcodeId, png) {
   return async (_input, options) => {
     const body = JSON.parse(options.body)
     if (body.req_0.method === 'GetSession') {
-      return musicuResponse({ session: { uid: 'session-uid', sid: 'session-sid', vkey: 'session-vkey' } })
+      return musicuResponse({
+        session: { uid: 'session-uid', sid: 'session-sid', vkey: 'session-vkey' }
+      })
     }
     assert.equal(body.req_0.method, 'CreateQRCode')
     return musicuResponse({ qrcodeID: qrcodeId, qrcode: png.toString('base64'), expiresIn: 180 })
@@ -290,14 +294,14 @@ test('registers the QQ provider and controlled settings contribution', async () 
     'library',
     'login'
   ])
-  assert.deepEqual(harness.provider.current.ui.streamingSections, [
-    {
-      id: 'new-songs',
-      title: '新歌推荐',
-      icon: 'pi pi-sparkles',
-      method: 'fetchRecommendSongs'
-    }
-  ])
+  assert.deepEqual(
+    harness.provider.current.ui.streamingSections.map(({ id, args }) => [id, args]),
+    [
+      ['daily', ['daily']],
+      ['soaring', ['soaring']],
+      ['hot', ['hot']]
+    ]
+  )
   for (const method of [
     'fetchRecommendSongs',
     'fetchRecommendPlaylists',
@@ -413,8 +417,7 @@ test('maps QQ song search results to provider-prefixed tracks', async () => {
         fileName: '晴天.mp3',
         duration: 269,
         size: 0,
-        cover:
-          'https://y.gtimg.cn/music/photo_new/T002R300x300M000002J4UUk29y8BY.jpg',
+        cover: 'https://y.gtimg.cn/music/photo_new/T002R300x300M000002J4UUk29y8BY.jpg',
         lyrics: null,
         translatedLyrics: null,
         source: 'qq',
@@ -436,7 +439,9 @@ test('maps playlist and artist search results through the shared QQ search endpo
       if (url.searchParams.get('remoteplace') === 'txt.yqq.playlist') {
         return jsonResponse({
           code: 0,
-          data: { playlist: { totalnum: 1, list: [{ dissid: '42', dissname: '华语精选', songnum: 12 }] } }
+          data: {
+            playlist: { totalnum: 1, list: [{ dissid: '42', dissname: '华语精选', songnum: 12 }] }
+          }
         })
       }
       return jsonResponse({
@@ -530,7 +535,7 @@ test('loads Rain120 homepage songs and playlists through public Musicu requests'
       })
     },
     async () => {
-      const songs = await harness.provider.current.fetchRecommendSongs()
+      const songs = await harness.provider.current.fetchRecommendSongs('new')
       const playlists = await harness.provider.current.fetchRecommendPlaylists()
       assert.equal(calls, 2)
       assert.equal(songs[0].id, 'qq:new-mid')
@@ -545,6 +550,139 @@ test('loads Rain120 homepage songs and playlists through public Musicu requests'
         ]
       )
       assert.equal(playlists[1].trackCount, 2)
+    }
+  )
+})
+
+test('QQ homepage follows each chart current period and maps playable song metadata', async () => {
+  const harness = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
+  const seen = []
+  await withFetch(
+    async (input) => {
+      const requests = JSON.parse(new URL(input).searchParams.get('data'))
+      if (requests.toplist)
+        return jsonResponse({
+          toplist: {
+            code: 0,
+            data: {
+              group: [
+                {
+                  toplist: [
+                    { topId: 62, period: '2026-09-06' },
+                    { topId: 26, period: '2026_35' }
+                  ]
+                }
+              ]
+            }
+          }
+        })
+      const param = requests.chart.param
+      seen.push(param)
+      return jsonResponse({
+        chart: {
+          code: 0,
+          data: {
+            songInfoList: [
+              {
+                id: param.topId,
+                mid: 'song-' + param.topId,
+                title: '榜单歌曲',
+                interval: 218,
+                singer: [{ name: '歌手', mid: 'artist' }],
+                album: { mid: 'album', name: '专辑' },
+                file: { media_mid: 'media-' + param.topId }
+              }
+            ]
+          }
+        }
+      })
+    },
+    async () => {
+      assert.equal(harness.provider.current.ui.streamingHome.requiresLogin, false)
+      for (const section of harness.provider.current.ui.streamingSections.slice(1)) {
+        const tracks = await harness.provider.current[section.method](...section.args, {
+          signal: new AbortController().signal
+        })
+        assert.equal(tracks.length, 1)
+        assert.equal(tracks[0].providerMediaId, 'media-' + tracks[0].providerSongId)
+        assert.equal(tracks[0].artist, '歌手')
+        assert.equal(tracks[0].duration, 218)
+      }
+      assert.deepEqual(seen, [
+        { topId: 62, period: '2026-09-06', offset: 0, num: 30 },
+        { topId: 26, period: '2026_35', offset: 0, num: 30 }
+      ])
+    }
+  )
+})
+
+test('QQ daily recommendations use the authenticated Daily 30 directory and keep playback metadata', async () => {
+  const harness = await startPlugin({
+    disclaimer: { disclaimerVersion: CONSENT_VERSION },
+    auth: nativeAuth(),
+    'native-device': nativeDevice()
+  })
+  const section = harness.provider.current.ui.streamingSections[0]
+  assert.equal(section.title, '每日推荐')
+  assert.equal(section.requiresLogin, true)
+  await withFetch(
+    async (_input, options) => {
+      const body = JSON.parse(options.body)
+      assert.equal(body.req_0.module, 'music.srfDissInfo.DissInfo')
+      assert.equal(body.req_0.method, 'CgiGetDiss')
+      assert.equal(body.req_0.param.dirid, 202)
+      assert.equal(body.req_0.param.disstid, 0)
+      assert.equal(body.req_0.param.song_num, 30)
+      assert.equal(body.comm.authst, 'private-key')
+      return musicuResponse({
+        songlist: [
+          {
+            id: 123,
+            mid: 'daily-mid',
+            title: '每日推荐歌曲',
+            interval: 220,
+            singer: [{ name: '歌手' }],
+            album: { name: '专辑', mid: 'album' },
+            file: { media_mid: 'daily-media' }
+          }
+        ]
+      })
+    },
+    async () => {
+      const tracks = await harness.provider.current.fetchRecommendSongs('daily', {
+        signal: new AbortController().signal
+      })
+      assert.equal(tracks[0].id, 'qq:daily-mid')
+      assert.equal(tracks[0].providerMediaId, 'daily-media')
+      assert.equal(tracks[0].title, '每日推荐歌曲')
+    }
+  )
+})
+
+test('QQ daily recommendations require login and do not substitute new releases', async () => {
+  const harness = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
+  await withFetch(
+    async () => assert.fail('Guest daily recommendations must not reach upstream'),
+    async () => {
+      await assert.rejects(() => harness.provider.current.fetchRecommendSongs(), /扫码登录/)
+      await assert.rejects(
+        () =>
+          harness.provider.current.fetchRecommendSongs({ signal: new AbortController().signal }),
+        /扫码登录/
+      )
+    }
+  )
+})
+
+test('QQ chart failures and consent errors remain actionable instead of yielding empty success', async () => {
+  let harness = await startPlugin()
+  await assert.rejects(() => harness.provider.current.fetchRecommendSongs('hot'), /免责声明/)
+  await deactivate()
+  harness = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
+  await withFetch(
+    async () => jsonResponse({ toplist: { code: 0, data: { group: [] } } }),
+    async () => {
+      await assert.rejects(() => harness.provider.current.fetchRecommendSongs('hot'), /期数不可用/)
     }
   )
 })
@@ -708,7 +846,11 @@ test('performs QQ Music native QR login and persists only a private auth session
           assert.deepEqual(body.req_0.param, { tmeAppID: 'qqmusic', ct: 11, cv: 14090008 })
           assert.equal(body.comm.ct, 23)
           assert.equal(body.comm.cv, 0)
-          return musicuResponse({ qrcodeID: 'native-qr', qrcode: png.toString('base64'), expiresIn: 180 })
+          return musicuResponse({
+            qrcodeID: 'native-qr',
+            qrcode: png.toString('base64'),
+            expiresIn: 180
+          })
         }
         if (body.req_0.method === 'Login') {
           assert.equal(body.req_0.module, 'music.login.LoginServer')
@@ -741,7 +883,13 @@ test('performs QQ Music native QR login and persists only a private auth session
         })
         assert.equal(calls, 5)
         const auth = harness.values.get('auth')
-        assert.deepEqual(Object.keys(auth).sort(), ['credential', 'profile', 'uin', 'updatedAt', 'version'])
+        assert.deepEqual(Object.keys(auth).sort(), [
+          'credential',
+          'profile',
+          'uin',
+          'updatedAt',
+          'version'
+        ])
         assert.equal(auth.uin, '123456')
         assert.equal(auth.credential.musickey, 'music-key')
         assert.equal(harness.values.get('native-device').qimei, 'q16-test')
@@ -767,25 +915,22 @@ test('reports invalid native QR credentials instead of waiting forever', async (
     ]
   })
   await withWebSocket(FakeMqttWebSocket, async () => {
-    await withFetch(
-      nativeQrFetch('failed-qr', png),
-      async () => {
-        const qr = await harness.provider.current.getQrLogin()
-        await flushAsync()
-        assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
-          code: 502,
-          message: 'QQ 音乐已确认扫码，但登录会话未建立，请刷新二维码后重试'
-        })
-        assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
-          code: 65,
-          message: '二维码不存在或已过期'
-        })
-        assert.equal(harness.values.has('auth'), false)
-        const logText = JSON.stringify(harness.logs)
-        assert.equal(logText.includes('123456'), false)
-        assert.equal(logText.includes('failed-qr'), false)
-      }
-    )
+    await withFetch(nativeQrFetch('failed-qr', png), async () => {
+      const qr = await harness.provider.current.getQrLogin()
+      await flushAsync()
+      assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
+        code: 502,
+        message: 'QQ 音乐已确认扫码，但登录会话未建立，请刷新二维码后重试'
+      })
+      assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
+        code: 65,
+        message: '二维码不存在或已过期'
+      })
+      assert.equal(harness.values.has('auth'), false)
+      const logText = JSON.stringify(harness.logs)
+      assert.equal(logText.includes('123456'), false)
+      assert.equal(logText.includes('failed-qr'), false)
+    })
   })
 })
 
@@ -797,16 +942,10 @@ test('reports native QR connection failures before a user scans', async () => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   resetFakeMqtt({ connackCode: 0x87 })
   await withWebSocket(FakeMqttWebSocket, async () => {
-    await withFetch(
-      nativeQrFetch('rejected-qr', png),
-      async () => {
-        await assert.rejects(
-          () => harness.provider.current.getQrLogin(),
-          /二维码登录初始化失败/
-        )
-        assert.equal(JSON.stringify(harness.logs).includes('rejected-qr'), false)
-      }
-    )
+    await withFetch(nativeQrFetch('rejected-qr', png), async () => {
+      await assert.rejects(() => harness.provider.current.getQrLogin(), /二维码登录初始化失败/)
+      assert.equal(JSON.stringify(harness.logs).includes('rejected-qr'), false)
+    })
   })
 })
 
@@ -818,28 +957,25 @@ test('maps scanned and expired native QR states and releases the listener', asyn
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   resetFakeMqtt({ events: [mqttQrEvent('expired-qr', 'scanned', {})] })
   await withWebSocket(FakeMqttWebSocket, async () => {
-    await withFetch(
-      nativeQrFetch('expired-qr', png),
-      async () => {
-        const qr = await harness.provider.current.getQrLogin()
-        await flushAsync()
+    await withFetch(nativeQrFetch('expired-qr', png), async () => {
+      const qr = await harness.provider.current.getQrLogin()
+      await flushAsync()
+      assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
+        code: 67,
+        message: '已扫描二维码'
+      })
+      const originalNow = Date.now
+      Date.now = () => originalNow() + 4 * 60 * 1000
+      try {
         assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
-          code: 67,
-          message: '已扫描二维码'
+          code: 65,
+          message: '二维码已过期'
         })
-        const originalNow = Date.now
-        Date.now = () => originalNow() + 4 * 60 * 1000
-        try {
-          assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
-            code: 65,
-            message: '二维码已过期'
-          })
-          assert.equal(FakeMqttWebSocket.instances[0].closed, true)
-        } finally {
-          Date.now = originalNow
-        }
+        assert.equal(FakeMqttWebSocket.instances[0].closed, true)
+      } finally {
+        Date.now = originalNow
       }
-    )
+    })
   })
 })
 
@@ -851,19 +987,16 @@ test('clears uncompleted native QR sessions during deactivation', async () => {
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   resetFakeMqtt()
   await withWebSocket(FakeMqttWebSocket, async () => {
-    await withFetch(
-      nativeQrFetch('deactivate-qr', png),
-      async () => {
-        const qr = await harness.provider.current.getQrLogin()
-        await deactivate()
-        assert.equal(FakeMqttWebSocket.instances[0].closed, true)
-        const restarted = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
-        assert.deepEqual(await restarted.provider.current.checkQrLogin(qr.key), {
-          code: 65,
-          message: '二维码不存在或已过期'
-        })
-      }
-    )
+    await withFetch(nativeQrFetch('deactivate-qr', png), async () => {
+      const qr = await harness.provider.current.getQrLogin()
+      await deactivate()
+      assert.equal(FakeMqttWebSocket.instances[0].closed, true)
+      const restarted = await startPlugin({ disclaimer: { disclaimerVersion: CONSENT_VERSION } })
+      assert.deepEqual(await restarted.provider.current.checkQrLogin(qr.key), {
+        code: 65,
+        message: '二维码不存在或已过期'
+      })
+    })
   })
 })
 
@@ -876,20 +1009,17 @@ test('logout clears the private session and any uncompleted native QR state', as
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
   resetFakeMqtt()
   await withWebSocket(FakeMqttWebSocket, async () => {
-    await withFetch(
-      nativeQrFetch('logout-qr', png),
-      async () => {
-        const qr = await harness.provider.current.getQrLogin()
-        await harness.provider.current.logout()
-        assert.equal(harness.values.has('auth'), false)
-        assert.equal(harness.values.has('native-device'), false)
-        assert.equal(FakeMqttWebSocket.instances[0].closed, true)
-        assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
-          code: 65,
-          message: '二维码不存在或已过期'
-        })
-      }
-    )
+    await withFetch(nativeQrFetch('logout-qr', png), async () => {
+      const qr = await harness.provider.current.getQrLogin()
+      await harness.provider.current.logout()
+      assert.equal(harness.values.has('auth'), false)
+      assert.equal(harness.values.has('native-device'), false)
+      assert.equal(FakeMqttWebSocket.instances[0].closed, true)
+      assert.deepEqual(await harness.provider.current.checkQrLogin(qr.key), {
+        code: 65,
+        message: '二维码不存在或已过期'
+      })
+    })
   })
 })
 
@@ -981,12 +1111,15 @@ test('loads user playlists and song details with private QQ session headers', as
           ]
         })
       }
-      if (body.req_0.method === 'GetLoginUserInfo') return musicuResponse({ info: { nick: '测试用户' } })
+      if (body.req_0.method === 'GetLoginUserInfo')
+        return musicuResponse({ info: { nick: '测试用户' } })
       assert.equal(body.req_0.method, 'CgiGetDiss')
       if (body.req_0.param.dirid === 201) {
         assert.equal(body.req_0.param.enc_host_uin, 'encrypted-uin')
         return musicuResponse({
-          songlist: [{ songmid: 'liked-1', songid: 2, songname: '喜欢的歌', singer: [{ name: '歌手' }] }]
+          songlist: [
+            { songmid: 'liked-1', songid: 2, songname: '喜欢的歌', singer: [{ name: '歌手' }] }
+          ]
         })
       }
       assert.equal(body.req_0.param.disstid, 200)
@@ -1066,7 +1199,10 @@ test('uses quality fallback and serves playback through the local Range proxy', 
         const qualityFile = body.req_0.param.filename[0]
         vkeyRequests.push(qualityFile)
         if (qualityFile.startsWith('F000')) {
-          return musicuResponse({ sip: ['https://stream.example/'], midurlinfo: [{ songmid: 'mid-1', purl: '' }] })
+          return musicuResponse({
+            sip: ['https://stream.example/'],
+            midurlinfo: [{ songmid: 'mid-1', purl: '' }]
+          })
         }
         return musicuResponse({
           sip: [],
@@ -1093,7 +1229,10 @@ test('uses quality fallback and serves playback through the local Range proxy', 
         { quality: 'flac' }
       )
       assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/qqmusic\/stream\//)
-      assert.deepEqual(vkeyRequests.map((value) => value.slice(0, 4)), ['F000', 'M800'])
+      assert.deepEqual(
+        vkeyRequests.map((value) => value.slice(0, 4)),
+        ['F000', 'M800']
+      )
       const response = await realFetch(url, { headers: { Range: 'bytes=0-9' } })
       assert.equal(response.status, 206)
       assert.equal(response.headers.get('content-range'), 'bytes 0-9/10')
@@ -1167,7 +1306,10 @@ test('refreshes one expired upstream stream URL and rejects invalid proxy tokens
       if (url.startsWith('https://stream.example/')) {
         streamCalls += 1
         if (streamCalls === 1) return new Response('', { status: 403 })
-        return new Response(Buffer.from('fresh-audio'), { status: 200, headers: { 'content-type': 'audio/mpeg' } })
+        return new Response(Buffer.from('fresh-audio'), {
+          status: 200,
+          headers: { 'content-type': 'audio/mpeg' }
+        })
       }
       throw new Error(`unexpected request: ${url}`)
     },
@@ -1190,10 +1332,14 @@ test('propagates cancellation and clears the proxy during deactivation', async (
   await withFetch(
     (_input, options) =>
       new Promise((_resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+          once: true
+        })
       }),
     async () => {
-      const pending = harness.provider.current.searchSongs('cancel', 10, 0, { signal: controller.signal })
+      const pending = harness.provider.current.searchSongs('cancel', 10, 0, {
+        signal: controller.signal
+      })
       controller.abort(new Error('caller cancelled'))
       await assert.rejects(pending, /caller cancelled/)
     }

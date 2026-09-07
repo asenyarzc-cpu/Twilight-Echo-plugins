@@ -131,11 +131,41 @@ export async function activate(context) {
     capabilities: ['search', 'playbackUrl', 'lyrics', 'cover', 'playlist', 'library', 'login'],
     ui: {
       icon: 'pi pi-headphones',
-      color: '#f29c1f',
-      description: '内置 KuGouMusicApi 服务，随应用启动，开箱即用',
+      color: '#2599ef',
+      description: '每日推荐、私人 FM、酷狗飙升榜与 Hi-Res 歌单',
       authType: 'qr',
       loginInstructions: '请先确认免责声明；公开搜索无需登录，播放和访问个人歌单前请扫码',
       qrStatusCodes: { waiting: 1, scanned: 2, expired: 0, success: 4 },
+      streamingHome: { requiresLogin: false, subtitle: '让好音乐，成为日常。' },
+      streamingDiscovery: { supportsSort: false },
+      streamingSections: [
+        {
+          id: 'daily',
+          title: '每日推荐',
+          icon: 'pi pi-sun',
+          method: 'fetchRecommendSongs',
+          args: ['daily'],
+          eyebrow: 'DAILY DISCOVERY',
+          description: '每天一份新的相遇，从熟悉的旋律听到意外的惊喜。'
+        },
+        {
+          id: 'fm',
+          title: '私人 FM',
+          icon: 'pi pi-headphones',
+          method: 'fetchPersonalFm',
+          eyebrow: 'PERSONAL RADIO',
+          description: '让音乐接着放，下一首交给酷狗。'
+        },
+        {
+          id: 'rising',
+          title: '酷狗飙升榜',
+          icon: 'pi pi-chart-line',
+          method: 'fetchRecommendSongs',
+          args: ['rising'],
+          eyebrow: 'ON THE RISE',
+          description: '捕捉正在升温的声音，听见此刻的流行。'
+        }
+      ],
       streamingLibraryTab: true,
       streamingSearch: true,
       unifiedLibrary: true
@@ -143,6 +173,11 @@ export async function activate(context) {
     searchSongs,
     searchPlaylists,
     searchArtists,
+    fetchRecommendSongs,
+    fetchPersonalFm,
+    fetchRecommendPlaylists,
+    fetchPlaylistCategories,
+    fetchDiscoveryPlaylists,
     getPlaybackUrl,
     getLyrics,
     fetchPlaylistTracks,
@@ -344,6 +379,88 @@ async function publicSearchRequest(type, keywords, page, pageSize, signal) {
     throw new Error(safeErrorMessage(payload.error || payload.error_msg || '酷狗搜索失败'))
   }
   return payload
+}
+
+async function fetchRecommendSongs(section = 'daily', requestContext) {
+  if (section && typeof section === 'object') {
+    requestContext = section
+    section = 'daily'
+  }
+  await assertConsent()
+  if (!['daily', 'rising'].includes(section)) throw new Error('酷狗首页分区不存在')
+  const payload = await adapterRequest(
+    section === 'rising' ? '/rank/audio' : '/everyday/recommend',
+    section === 'rising' ? { rankid: 6666, page: 1, pagesize: 30 } : {},
+    { signal: requestSignal(requestContext), fresh: true }
+  )
+  return extractTrackItems(payload).map(mapKugouTrack).filter(Boolean)
+}
+
+async function fetchPersonalFm(requestContext) {
+  await assertConsent()
+  const payload = await adapterRequest(
+    '/personal/fm',
+    {},
+    { signal: requestSignal(requestContext), fresh: true }
+  )
+  return extractTrackItems(payload).map(mapKugouTrack).filter(Boolean)
+}
+
+async function fetchRecommendPlaylists(requestContext) {
+  const page = await fetchDiscoveryPlaylists('全部', 'hot', 12, 0, requestContext)
+  return page.items
+}
+
+async function fetchPlaylistCategories() {
+  await assertConsent()
+  return {
+    hotTags: ['全部', 'Hi-Res'],
+    groups: [
+      {
+        id: 0,
+        name: '酷狗专区',
+        tags: [
+          { name: '全部', hot: true },
+          { name: 'Hi-Res', hot: true }
+        ]
+      }
+    ]
+  }
+}
+
+async function fetchDiscoveryPlaylists(
+  cat = '全部',
+  _order = 'hot',
+  limit = 30,
+  offset = 0,
+  requestContext
+) {
+  await assertConsent()
+  if (!['全部', 'Hi-Res'].includes(cat)) throw new Error('酷狗歌单分类不存在')
+  const pageSize = normalizeLimit(limit)
+  const normalizedOffset = Math.max(0, Math.floor(Number(offset) || 0))
+  const payload = await adapterRequest(
+    '/top/playlist',
+    {
+      category_id: cat === 'Hi-Res' ? 11292 : 0,
+      page: Math.floor(normalizedOffset / pageSize) + 1,
+      pagesize: pageSize,
+      withsong: 1
+    },
+    { signal: requestSignal(requestContext), fresh: true }
+  )
+  const items = extractPlaylistItems(payload)
+    .slice(0, pageSize)
+    .map(mapKugouPlaylist)
+    .filter(Boolean)
+  const hasMore = Number(payload.data?.has_next) === 1 && items.length > 0
+  return {
+    items,
+    total: extractTotal(payload, 0),
+    hasMore,
+    offset: normalizedOffset,
+    limit: pageSize
+  }
 }
 
 async function getPlaybackUrl(track, options = {}, requestContext) {
@@ -569,17 +686,22 @@ async function fetchPlaylistTracks(playlistId, force = false, requestContext) {
   await assertConsent()
   await ensureDevice(requestContext)
   const id = normalizePlaylistId(playlistId)
-  const payload = await adapterRequest(
-    '/playlist/track/all',
-    {
-      id,
-      page: 1,
-      pagesize: MAX_PAGE_SIZE,
-      timestamp: force ? Date.now() : undefined
-    },
-    { signal: requestSignal(requestContext) }
-  )
-  return extractTrackItems(payload).map(mapKugouTrack).filter(Boolean)
+  const tracks = []
+  for (let page = 1; ; page += 1) {
+    const payload = await adapterRequest(
+      '/playlist/track/all',
+      { id, page, pagesize: MAX_PAGE_SIZE },
+      { signal: requestSignal(requestContext), fresh: force }
+    )
+    const items = extractTrackItems(payload)
+    for (const item of items) {
+      const track = mapKugouTrack(item)
+      if (track) tracks.push(track)
+    }
+    const total = extractTotal(payload, 0)
+    if (items.length < MAX_PAGE_SIZE || (total > 0 && page * MAX_PAGE_SIZE >= total)) break
+  }
+  return tracks
 }
 
 async function ensureDevice(requestContext) {
@@ -913,6 +1035,7 @@ function adapterError(message, code) {
 
 function extractTrackItems(payload) {
   return firstArray(
+    payload?.data?.song_list,
     payload?.data?.info,
     payload?.data?.lists,
     payload?.data?.songs,
@@ -925,6 +1048,7 @@ function extractTrackItems(payload) {
 
 function extractPlaylistItems(payload) {
   return firstArray(
+    payload?.data?.special_list,
     payload?.data?.info,
     payload?.data?.lists,
     payload?.data?.list,
@@ -958,7 +1082,13 @@ function extractTotal(payload, fallback) {
 
 export function mapKugouTrack(item) {
   if (!item || typeof item !== 'object') return null
-  const hash = firstString(item.hash, item.FileHash, item.filehash, item.audio_hash).toUpperCase()
+  const hash = firstString(
+    item.hash,
+    item.FileHash,
+    item.filehash,
+    item.audio_hash,
+    item.audio_info?.hash_128
+  ).toUpperCase()
   if (!hash) return null
   const rawName = firstString(
     item.songname,
@@ -990,6 +1120,7 @@ export function mapKugouTrack(item) {
       item.albumname,
       item.album,
       item.albuminfo?.name,
+      item.album_info?.album_name,
       item.remark
     )
   )
@@ -1014,13 +1145,16 @@ export function mapKugouTrack(item) {
       item.timelength,
       item.timelen,
       item.Duration,
-      item.time_length
+      item.time_length,
+      item.audio_info?.duration_128
     ),
     size: normalizeCount(
       item.filesize,
       item.size,
       item.filesize_320,
       item.filesize_128,
+      item.file_size,
+      item.audio_info?.filesize_128,
       item.FileSize
     ),
     cover: normalizeCover(
@@ -1028,6 +1162,9 @@ export function mapKugouTrack(item) {
         item.imgurl,
         item.cover,
         item.album_sizable_cover,
+        item.sizable_cover,
+        item.album_info?.sizable_cover,
+        item.trans_param?.union_cover,
         item.image,
         item.Image,
         item.AlbumImage
@@ -1068,8 +1205,18 @@ function mapKugouPlaylist(item) {
   return {
     id,
     name,
-    cover: normalizeCover(firstString(item.imgurl, item.cover, item.picurl, item.image)) || null,
-    trackCount: normalizeCount(item.song_count, item.songnum, item.count, item.total),
+    cover:
+      normalizeCover(
+        firstString(item.imgurl, item.flexible_cover, item.cover, item.picurl, item.image)
+      ) || null,
+    trackCount: normalizeCount(
+      item.song_count,
+      item.songcount,
+      item.songnum,
+      item.count,
+      item.total
+    ),
+    ...(Number(item.play_count) > 0 ? { playCount: Number(item.play_count) } : {}),
     creatorName: firstString(item.nickname, item.username, item.creator_name) || undefined,
     owned: Number(item.is_owner ?? item.owned ?? item.type) === 1
   }

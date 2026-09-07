@@ -1,8 +1,8 @@
 {
   "id": "com.twilightecho.provider.kugou",
   "name": "酷狗音乐音源",
-  "version": "0.2.3",
-  "description": "内置 KuGouMusicApi 服务（随应用启动、仅监听本机），在 Twilight Echo 中搜索、播放和浏览酷狗音乐。",
+  "version": "0.3.0",
+  "description": "酷狗每日推荐、私人 FM、飙升榜与 Hi-Res 歌单，支持搜索、播放、歌词和扫码登录；API 服务内置并仅监听本机。",
   "author": "Px_asen",
   "license": "Apache-2.0",
   "type": ["provider", "ui"],
