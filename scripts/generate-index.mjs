@@ -9,7 +9,7 @@ import { promisify } from 'node:util'
 const execFileAsync = promisify(execFile)
 
 const INDEX_SCHEMA_VERSION = 1
-const DEFAULT_REPOSITORY = 'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins'
+const DEFAULT_REPOSITORY = 'https://github.com/Px-asen/Twilight-Echo-plugins'
 const BUNDLED_PLUGIN_IDS = new Set(['com.twilightecho.provider.ncm'])
 const REQUIRED_FIELDS = [
   'id',

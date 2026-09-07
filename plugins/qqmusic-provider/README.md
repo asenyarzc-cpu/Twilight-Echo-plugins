@@ -50,7 +50,7 @@ Twilight Echo 的 QQ 音乐 Provider 插件。
 
 本插件及其上游接口仅供个人学习与研究使用。插件作者与腾讯、QQ 音乐没有隶属、代理或授权关系。用户须自行遵守适用法律、QQ 音乐服务条款和版权要求，并对自己的账号、请求和播放行为负责。上游 QQ 音乐接口字段、可用地区、登录策略和播放权限可能随时变化；插件不保证持续可用，也不收集遥测数据。
 
-问题反馈请提交到 [GitHub Issues](https://github.com/asenyarzc-cpu/Twilight-Echo-plugins/issues/new)。请勿在 Issue、日志或截图中粘贴 Cookie、二维码签名或其他账号凭据。
+问题反馈请提交到 [GitHub Issues](https://github.com/Px-asen/Twilight-Echo-plugins/issues/new)。请勿在 Issue、日志或截图中粘贴 Cookie、二维码签名或其他账号凭据。
 
 ## 上游与许可证
 

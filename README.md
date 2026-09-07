@@ -153,7 +153,7 @@ license/attribution file alongside the runtime files.
 After pushing this repository, use the raw `plugins.json` URL:
 
 ```powershell
-$env:TWILIGHT_PLUGIN_INDEX_URL="https://raw.githubusercontent.com/asenyarzc-cpu/Twilight-Echo-plugins/main/plugins.json"
+$env:TWILIGHT_PLUGIN_INDEX_URL="https://raw.githubusercontent.com/Px-asen/Twilight-Echo-plugins/main/plugins.json"
 pnpm run dev
 ```
 

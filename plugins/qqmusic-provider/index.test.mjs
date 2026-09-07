@@ -336,7 +336,7 @@ test('blocks all upstream work until the disclaimer is accepted', async () => {
       assert.equal(form.kind, 'settings-form')
       assert.equal(form.submitCommand, SETTINGS_COMMAND)
       assert.match(form.notice, /仅供个人学习与研究使用/)
-      assert.match(form.notice, /github.com\/asenyarzc-cpu\/Twilight-Echo-plugins\/issues/)
+      assert.match(form.notice, /github.com\/Px-asen\/Twilight-Echo-plugins\/issues/)
     }
   )
 })

@@ -45,7 +45,7 @@ test('generates plugins.json from packaged tep files', async () => {
   assert.equal(index.plugins[0].id, manifest.id)
   assert.equal(index.plugins[0].sourceUrl, `packages/${manifest.id}-${manifest.version}.tep`)
   assert.equal(index.plugins[0].checksumSha256, checksumSha256)
-  assert.equal(index.plugins[0].repository, 'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins')
+  assert.equal(index.plugins[0].repository, 'https://github.com/Px-asen/Twilight-Echo-plugins')
   assert.equal(index.plugins[0].verified, true)
 })
 

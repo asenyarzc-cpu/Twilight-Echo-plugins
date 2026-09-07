@@ -3,7 +3,7 @@
   "name": "酷狗音乐音源",
   "version": "0.3.0",
   "description": "酷狗每日推荐、私人 FM、飙升榜与 Hi-Res 歌单，支持搜索、播放、歌词和扫码登录；API 服务内置并仅监听本机。",
-  "author": "Px_asen",
+  "author": "Px-asen",
   "license": "Apache-2.0",
   "type": ["provider", "ui"],
   "main": "index.mjs",
@@ -12,6 +12,6 @@
   },
   "apiVersion": 1,
   "permissions": ["network", "settings", "ui:inject", "library:read"],
-  "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-  "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins"
+  "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+  "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins"
 }

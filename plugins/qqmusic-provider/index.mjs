@@ -13,7 +13,7 @@ const DEVICE_KEY = 'native-device'
 const CONSENT_KEY = 'disclaimer'
 const CONSENT_VERSION = 'qqmusic-v1'
 const SETTINGS_COMMAND = 'qqmusic.settings'
-const ISSUES_URL = 'https://github.com/asenyarzc-cpu/Twilight-Echo-plugins/issues/new'
+const ISSUES_URL = 'https://github.com/Px-asen/Twilight-Echo-plugins/issues/new'
 
 const QQ_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'

@@ -6,7 +6,7 @@
       "name": "Bilibili 收藏夹音源",
       "version": "0.1.13",
       "description": "在流媒体页的 Bilibili 入口中搜索视频并播放收藏夹音频。支持搜索、多 P 展开、Cookie 静默刷新与 DASH 高音质播放。",
-      "author": "Px_asen",
+      "author": "Px-asen",
       "license": "Apache-2.0",
       "type": [
         "provider",
@@ -23,10 +23,10 @@
         "ui:inject",
         "library:read"
       ],
-      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins",
       "sourceUrl": "packages/com.twilightecho.provider.bilibili-0.1.13.tep",
-      "checksumSha256": "565fe7cb4cd9a06de39d79f40ba53c799ae64ef157501364da66bcfae7c8436d",
+      "checksumSha256": "5bb7e5856af91b728cf4bd6ef76ac7501da930d7f2f5c2f78dea4bdb07d8bb89",
       "tags": [
         "provider",
         "ui",
@@ -39,7 +39,7 @@
       "name": "酷狗音乐音源",
       "version": "0.3.0",
       "description": "酷狗每日推荐、私人 FM、飙升榜与 Hi-Res 歌单，支持搜索、播放、歌词和扫码登录；API 服务内置并仅监听本机。",
-      "author": "Px_asen",
+      "author": "Px-asen",
       "license": "Apache-2.0",
       "type": [
         "provider",
@@ -56,10 +56,10 @@
         "ui:inject",
         "library:read"
       ],
-      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins",
       "sourceUrl": "packages/com.twilightecho.provider.kugou-0.3.0.tep",
-      "checksumSha256": "4277e6c95fd499375b42c3cbf7e1bb8b631ebfd32d899affd36b47207a365232",
+      "checksumSha256": "b1de88864aa44545f4729062525ef7b281577b328997ab9b65bc38d067ae2783",
       "tags": [
         "provider",
         "ui",
@@ -72,7 +72,7 @@
       "name": "QQ 音乐音源",
       "version": "0.3.1",
       "description": "QQ 音乐每日推荐、巅峰飙升榜、热歌榜与精选歌单，支持发现分类、搜索、歌词、原生扫码登录和用户歌单。",
-      "author": "Px_asen",
+      "author": "Px-asen",
       "license": "Apache-2.0",
       "type": [
         "provider",
@@ -89,10 +89,10 @@
         "ui:inject",
         "library:read"
       ],
-      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins",
       "sourceUrl": "packages/com.twilightecho.provider.qqmusic-0.3.1.tep",
-      "checksumSha256": "12149082271fc52d710e11004308ab96bbcb59c1bc4a0681140befa7583f716a",
+      "checksumSha256": "b71fda7d038e95db6fde6619a7515f978bcdc3bc02367f335deb94a179420a1e",
       "tags": [
         "provider",
         "ui",
@@ -105,7 +105,7 @@
       "name": "YouTube Music 音源",
       "version": "1.0.5",
       "description": "在 Twilight Echo 流媒体区搜索和播放 YouTube Music 曲库。基于 ytmusicapi 解析逻辑重构，支持搜索、播放、歌词、歌单和用户媒体库。",
-      "author": "Px_asen",
+      "author": "Px-asen",
       "license": "Apache-2.0",
       "type": [
         "provider",
@@ -122,10 +122,10 @@
         "ui:inject",
         "library:read"
       ],
-      "repository": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
-      "homepage": "https://github.com/asenyarzc-cpu/Twilight-Echo-plugins",
+      "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins",
       "sourceUrl": "packages/com.twilightecho.provider.ytmusic-1.0.5.tep",
-      "checksumSha256": "eeef0584cfb5aad1bda7eabdd2e17422b383de456d93060e2e9d6d4970ff4ff2",
+      "checksumSha256": "314f0cd1c0ce1c915f872d2c088f72fcaace1232ad1491f7c02ec995a3c2d196",
       "tags": [
         "provider",
         "ui",

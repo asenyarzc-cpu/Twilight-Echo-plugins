@@ -644,7 +644,7 @@ test('plugin.json has correct manifest fields', async () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
 
   assert.equal(manifest.id, 'com.twilightecho.provider.ytmusic')
-  assert.equal(manifest.author, 'Px_asen')
+  assert.equal(manifest.author, 'Px-asen')
   assert.ok(manifest.type.includes('provider'))
   assert.ok(manifest.type.includes('ui'))
   assert.ok(manifest.permissions.includes('network'))
