@@ -22,17 +22,16 @@ async function main() {
   const twilightRoot = path.resolve(
     process.env.TWILIGHT_ECHO_ROOT || readArg('--twilight-root') || DEFAULT_TWILIGHT_ROOT
   )
-  const { createZip } = require(path.join(twilightRoot, 'packages', 'create-twilight-plugin', 'lib', 'zip.cjs'))
-  const { validatePluginManifest } = require(path.join(
-    twilightRoot,
-    'packages',
-    'create-twilight-plugin',
-    'lib',
-    'manifest.cjs'
-  ))
+  const { createZip } = require(
+    path.join(twilightRoot, 'packages', 'create-twilight-plugin', 'lib', 'zip.cjs')
+  )
+  const { validatePluginManifest } = require(
+    path.join(twilightRoot, 'packages', 'create-twilight-plugin', 'lib', 'manifest.cjs')
+  )
 
   const manifestPath = path.join(pluginRoot, 'plugin.json')
-  const manifest = validatePluginManifest(await readJson(manifestPath))
+  const rawManifest = await readJson(manifestPath)
+  const manifest = validatePluginManifest(rawManifest)
   const packageName = `${manifest.id}-${manifest.version}.tep`
   const packagesDir = path.join(repoRoot, 'packages')
   const stagingDir = path.join(repoRoot, '.cache', `${manifest.id}-${manifest.version}`)
@@ -50,9 +49,40 @@ async function main() {
       await fs.copyFile(path.join(pluginRoot, binaryPath), path.join(stagingDir, binaryPath))
     }
   }
+  // Some providers ship a host-side runtime helper that is intentionally not
+  // imported by the utility-process entry. Keep those files in the package
+  // without including tests or development-only files.
+  const runtimeFiles = rawManifest.runtimeFiles ?? []
+  if (!Array.isArray(runtimeFiles)) {
+    throw new Error('plugin.json runtimeFiles must be an array')
+  }
+  for (const runtimePath of runtimeFiles) {
+    if (typeof runtimePath !== 'string' || !runtimePath.trim()) {
+      throw new Error('plugin.json runtimeFiles must contain non-empty relative paths')
+    }
+    const normalized = runtimePath.trim().replace(/\\/g, '/')
+    const relative = path.posix.normalize(normalized)
+    if (
+      relative === '.' ||
+      relative === '..' ||
+      relative.startsWith('../') ||
+      path.posix.isAbsolute(relative) ||
+      path.win32.isAbsolute(normalized)
+    ) {
+      throw new Error(`plugin.json runtimeFiles path escapes the plugin root: ${runtimePath}`)
+    }
+    const sourcePath = path.join(pluginRoot, ...relative.split('/'))
+    const targetPath = path.join(stagingDir, ...relative.split('/'))
+    const sourceStats = await fs.stat(sourcePath)
+    if (sourceStats.isDirectory()) await fs.cp(sourcePath, targetPath, { recursive: true })
+    else await fs.copyFile(sourcePath, targetPath)
+  }
   for (const supplementalFile of ['THIRD_PARTY_NOTICES.md']) {
     try {
-      await fs.copyFile(path.join(pluginRoot, supplementalFile), path.join(stagingDir, supplementalFile))
+      await fs.copyFile(
+        path.join(pluginRoot, supplementalFile),
+        path.join(stagingDir, supplementalFile)
+      )
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }

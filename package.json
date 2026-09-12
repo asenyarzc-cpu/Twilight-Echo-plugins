@@ -14,6 +14,7 @@
     "pack:bilibili": "node scripts/pack-plugin.cjs bilibili-provider && pnpm run index",
     "pack:qqmusic": "node scripts/pack-plugin.cjs qqmusic-provider && pnpm run index",
     "pack:kugou": "node scripts/pack-plugin.cjs kugou-provider && pnpm run index",
+    "pack:qishui": "node scripts/pack-plugin.cjs qishui-provider && pnpm run index",
     "build:kugou-vendor": "node scripts/build-kugou-vendor.mjs"
   },
   "devDependencies": {

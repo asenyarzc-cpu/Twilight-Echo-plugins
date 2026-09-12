@@ -23,6 +23,11 @@ plugins/
     index.test.mjs
     README.md
     THIRD_PARTY_NOTICES.md
+  qishui-provider/
+    plugin.json
+    index.mjs
+    qishui-auth-v6.cjs
+    qishui-auth-v6/
   kugou-provider/
     plugin.json
     index.mjs
@@ -128,6 +133,13 @@ To package the KuGou Music provider specifically:
 ```powershell
 $env:TWILIGHT_ECHO_ROOT="D:\Twilight_Echo-Pxasen"
 pnpm run pack:kugou
+```
+
+To package the Qishui Music provider specifically:
+
+```powershell
+$env:TWILIGHT_ECHO_ROOT="D:\Twilight_Echo-Pxasen"
+pnpm run pack:qishui
 ```
 
 `pnpm run pack` creates or updates:

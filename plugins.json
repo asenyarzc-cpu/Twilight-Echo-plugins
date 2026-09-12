@@ -68,6 +68,45 @@
       "verified": true
     },
     {
+      "id": "com.twilightecho.provider.qishui",
+      "name": "汽水音乐音源",
+      "version": "0.4.6",
+      "description": "汽水音乐原生 Provider：发现主页、推荐歌单、个人音乐库、搜索、封面、歌词与播放音源；支持宿主安全扫码登录。",
+      "author": "OpenAI",
+      "license": "Apache-2.0",
+      "type": [
+        "provider",
+        "ui"
+      ],
+      "main": "index.mjs",
+      "runtimeFiles": [
+        "playback.mjs",
+        "images.mjs",
+        "home.mjs",
+        "qishui-auth-v6.cjs",
+        "qishui-auth-v6"
+      ],
+      "engines": {
+        "twilightEcho": ">=0.20.0"
+      },
+      "apiVersion": 1,
+      "permissions": [
+        "network",
+        "settings",
+        "ui:inject",
+        "library:read"
+      ],
+      "repository": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "homepage": "https://github.com/Px-asen/Twilight-Echo-plugins",
+      "sourceUrl": "packages/com.twilightecho.provider.qishui-0.4.6.tep",
+      "checksumSha256": "62f51f0ff8f75d6d7723a57e8e4189e30d32fbff2493e6d4e02adc93634019b1",
+      "tags": [
+        "provider",
+        "ui"
+      ],
+      "verified": true
+    },
+    {
       "id": "com.twilightecho.provider.qqmusic",
       "name": "QQ 音乐音源",
       "version": "0.3.1",
